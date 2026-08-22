@@ -74,12 +74,16 @@ describe("JWS vectors", () => {
     expect(verified.payload).toEqual(v.payload);
   });
 
-  it("a single flipped byte in the stored signature fails verification", async () => {
+  it("a single flipped character in the stored signature fails verification", async () => {
     const key = await importPublicKey(vectors.keys.ed25519.public as never);
     const v = vectors.jws.ed25519_deterministic;
 
     const [h, p, s] = v.compact.split(".") as [string, string, string];
-    const flipped = `${s.slice(0, -1)}${s.at(-1) === "A" ? "B" : "A"}`;
+    // Deliberately mid-string. The FINAL character of a 64-byte signature
+    // carries only 4 significant bits, so flipping it can change nothing at
+    // all — see the canonical-encoding test in crypto.test.ts.
+    const mid = Math.floor(s.length / 2);
+    const flipped = `${s.slice(0, mid)}${s[mid] === "A" ? "B" : "A"}${s.slice(mid + 1)}`;
 
     await expect(verify(`${h}.${p}.${flipped}`, key, v.typ)).rejects.toThrow();
   });

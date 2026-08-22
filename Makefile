@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 ## help: list available targets
 help:
-	@echo "Pramaan — make targets"
+	@echo "Countersign — make targets"
 	@echo
 	@grep -E '^## [a-zA-Z_-]+:' $(MAKEFILE_LIST) \
 		| sed -e 's/## //' \

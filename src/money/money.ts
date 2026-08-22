@@ -1,7 +1,7 @@
 /**
  * Money.
  *
- * Every monetary value in Pramaan is a signed integer count of a currency's
+ * Every monetary value in Countersign is a signed integer count of a currency's
  * minor unit (paise for INR), carried as a `bigint` alongside its currency.
  * There is no float, no `number`, and no decimal string anywhere in the money
  * path. `format()` is the only function in the codebase that knows a decimal

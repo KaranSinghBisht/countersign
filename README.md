@@ -1,10 +1,12 @@
-# Pramaan
+# Countersign
 
-> **प्रमाण** — Sanskrit: *proof; the means by which a claim is known to be true.*
+> **countersign** *(n.)* — a second signature that validates the first; also, the word you must give at a checkpoint before you are let through.
 
 **A merchant server that an AI buyer can discover and buy from — and that can prove, afterwards, that the agent was never allowed outside its budget.**
 
 Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 01 — AI Growth & Agentic Commerce.
+
+Both senses of the name are load-bearing. A buying agent's authority arrives as a signature that only counts because a human's signature endorsed it, and no money moves until the agent produces the right token at a gate.
 
 ---
 
@@ -33,10 +35,22 @@ This mirrors the architecture Razorpay published for Bumblebee: deterministic ru
 
 ## Status
 
-Planning complete, implementation not started.
+Foundations built; the gate, ledger, audit log and verifier are next.
 
-- **[`docs/PLAN.md`](docs/PLAN.md)** — the full build plan: locked decisions, architecture, 14-day schedule, mandate and audit schemas, limitations, video cut
-- **[`docs/RESEARCH.md`](docs/RESEARCH.md)** — the landscape this is positioned against, with sources
+Done so far: integer-paise money with a property-tested conservation invariant, RFC 8785 canonicalization written in-house and differentially tested against the reference implementation, ES256/Ed25519 signing with committed golden vectors, allow-list log redaction that fails closed, and boot-time config validation that refuses to start with a live Razorpay key.
+
+- **[`docs/PLAN.md`](docs/PLAN.md)** — the full build plan: locked decisions, architecture, schedule, mandate and audit schemas, limitations
+- **[`docs/RESEARCH.md`](docs/RESEARCH.md)** — the landscape this is positioned against, with sources, including what could *not* be verified
+
+## Quickstart
+
+```bash
+make setup   # install pinned deps, create .env, generate signing keys
+make up      # postgres + jaeger, waits on real healthchecks
+make check   # lint, types, tests, credential scan
+```
+
+Add your `rzp_test_` credentials to `.env`. The service refuses to boot with a live key, and CI fails the build if one reaches a tracked file or the git history.
 
 ## Protocol shape
 

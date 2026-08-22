@@ -1,6 +1,6 @@
-# Pramaan — Build Plan
+# Countersign — Build Plan
 
-> **Pramaan** (प्रमाण) — Sanskrit: *proof, evidence, the means by which a claim is known to be true.*
+> **countersign** *(n.)* — a second signature that validates the first; also, the word you must give at a checkpoint before you are let through.
 
 **Submission:** Razorpay AI Buildathon, Track 01 — AI Growth & Agentic Commerce
 **Judging bar (verbatim):** *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
@@ -11,7 +11,7 @@
 
 **Razorpay's MCP server lets an agent operate a merchant's account. Prava lets a buyer's agent pay. Nobody has built the part in the middle: a merchant that an AI buyer has never met can discover, quote, and buy from — and afterwards prove it was never allowed outside its budget.**
 
-Track 01 asks for a merchant made "transactable by an AI buyer end to end." Pramaan is that merchant server:
+Track 01 asks for a merchant made "transactable by an AI buyer end to end." Countersign is that merchant server:
 
 1. **Discoverable** — serves ACP, UCP, and `/agents.md` so ChatGPT, a Gemini/Shopify-style agent, Claude, or a curl loop can all find it.
 2. **Transactable** — one service layer exposed as ACP REST *and* an MCP tool surface, plus an HTTP 402 payment step on UPI rails.
@@ -110,7 +110,7 @@ These bit us in research and would have bitten us in code:
         └───────────────────────────┬───────────────────────────┘
                                     ▼
                     ╔═══════════════════════════════╗
-                    ║  pramaan verify  (standalone) ║  ← runs offline, on
+                    ║  countersign verify  (standalone) ║  ← runs offline, on
                     ║  30 checks, exit 0/1          ║     the judge's laptop
                     ╚═══════════════════════════════╝
 ```
@@ -125,7 +125,7 @@ These bit us in research and would have bitten us in code:
 3. Agent  → GET /paid/report/42                                  (no credential)
 4. Server → 402
      WWW-Authenticate: Payment id="<HMAC(secret, realm|method|intent|request|expires)>",
-       realm="pramaan.example", method="razorpay", intent="charge",
+       realm="countersign.example", method="razorpay", intent="charge",
        request="<JCS+b64url {amount:14900, currency:'INR', resource:'/paid/report/42'}>",
        expires="2026-08-20T18:05:00Z"
      Content-Type: application/problem+json      ← RFC 9457 in the BODY, not the header
@@ -236,10 +236,10 @@ This is the crown jewel. Budget the full two days.
 
 **Two full days. This is the demo. It is not a stretch goal.**
 
-- [ ] `pramaan verify --bundle ./export.tar.gz --trust ./trust.json` — 30 checks across seven groups: log integrity, mandate chain, request binding, temporal/replay, bounds, external corroboration, policy replay.
+- [ ] `countersign verify --bundle ./export.tar.gz --trust ./trust.json` — 30 checks across seven groups: log integrity, mandate chain, request binding, temporal/replay, bounds, external corroboration, policy replay.
 - [ ] `trust.json` pins the public keys. **The verifier must never learn a key from the bundle it is checking.** That is the entire point.
 - [ ] Bundle: `records.jsonl`, `checkpoints/`, `mandates/`, `checkouts/`, `policy/`, `receipts/`, `MANIFEST.json`.
-- [ ] `pramaan verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `pramaan explain --order <id>` (**"every money action explainable" as a literal command**).
+- [ ] `countersign verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `countersign explain --order <id>` (**"every money action explainable" as a literal command**).
 - [ ] `--json`. Exit codes: 0 verified, 1 verification failure, 2 malformed bundle, 3 trust config error.
 - [ ] Failure output names the exact `seq` and the exact delta. Model the UX on `rekor-cli` and `cosign verify`.
 - [ ] **Single-file / static build.** Hand it to a judge on a USB stick.
@@ -273,10 +273,10 @@ Every one of these must run live, on demand, in under 20 seconds:
 
 ```json
 {
-  "vct": "in.pramaan.mandate.spend.open.1",
-  "iss": "https://pramaan.example/consent",
+  "vct": "dev.countersign.mandate.spend.open.1",
+  "iss": "https://countersign.example/consent",
   "sub": "usr_8f3ac21e",
-  "aud": "https://pramaan.example/agent-commerce",
+  "aud": "https://countersign.example/agent-commerce",
   "jti": "01K3QF7XNZ8VMT4A9YB2CDEFGH",
   "iat": 1755700000, "nbf": 1755700000, "exp": 1755786400,
   "cnf": { "jwk": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" } },

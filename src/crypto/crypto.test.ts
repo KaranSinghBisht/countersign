@@ -14,8 +14,23 @@ import {
   thumbprint,
 } from "./keys.js";
 
-const TYP_MANDATE = "application/pramaan-mandate+jws";
-const TYP_RECEIPT = "application/pramaan-receipt+jws";
+const TYP_MANDATE = "application/countersign-mandate+jws";
+const TYP_RECEIPT = "application/countersign-receipt+jws";
+
+const B64U_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * Flip bit 0 of the final base64url character.
+ *
+ * For any input whose length is not a multiple of 3, bit 0 of the last
+ * character is a surplus bit that decoders discard — so this produces a
+ * different string that decodes to identical bytes.
+ */
+function mutateSurplusBits(encoded: string): string {
+  const last = encoded.slice(-1);
+  const value = B64U_ALPHABET.indexOf(last);
+  return encoded.slice(0, -1) + B64U_ALPHABET[value ^ 1];
+}
 
 describe("encoding", () => {
   it("produces unpadded base64url", () => {
@@ -33,6 +48,32 @@ describe("encoding", () => {
   it("rejects padded or non-alphabet input, so one byte string has one encoding", () => {
     expect(() => b64uDecode("YQ==")).toThrow(/base64url/);
     expect(() => b64uDecode("a+b/c")).toThrow(/base64url/);
+  });
+
+  // The final character of a base64url string does not always carry a full
+  // six bits. "YQ" and "YR" both decode to the single byte 0x61, because the
+  // surplus low bits are ignored. Left unchecked, that is malleability: a
+  // signature or digest has more than one spelling, and any replay guard or
+  // dedupe keyed on the encoded form sees two values for one artifact.
+  it("rejects non-canonical trailing bits", () => {
+    // "YQ" and "YR" both decode to the single byte 0x61: one byte is 8 bits,
+    // two characters carry 12, and the surplus 4 are ignored.
+    expect(b64u(b64uDecode("YQ"))).toBe("YQ");
+    expect(() => b64uDecode("YR")).toThrow(/canonical/);
+
+    // Same defect at signature scale. A 64-byte Ed25519 signature is 512
+    // bits; 86 characters carry 516, so the last character's low 4 bits are
+    // surplus. Flip bit 0 — a surplus bit — and the bytes are unchanged.
+    const signature = b64u(new Uint8Array(64).fill(7));
+    expect(signature).toHaveLength(86);
+    expect(() => b64uDecode(mutateSurplusBits(signature))).toThrow(/canonical/);
+  });
+
+  it("accepts every canonical encoding it produces", () => {
+    for (let length = 0; length < 70; length++) {
+      const bytes = new Uint8Array(length).map((_, i) => (i * 37) % 256);
+      expect(b64uDecode(b64u(bytes))).toEqual(bytes);
+    }
   });
 
   it("concatenates in order", () => {
@@ -228,20 +269,24 @@ describe("JWS", () => {
   it("verifies Ed25519 as well as ES256", async () => {
     const key = await generateKey(CHECKPOINT_ALG);
     const pub = await importPublicKey(key.publicJwk);
-    const jws = await sign({ size: 4211, root: "abc" }, key, "application/pramaan-checkpoint+jws");
+    const jws = await sign(
+      { size: 4211, root: "abc" },
+      key,
+      "application/countersign-checkpoint+jws",
+    );
 
-    const verified = await verify(jws, pub, "application/pramaan-checkpoint+jws");
+    const verified = await verify(jws, pub, "application/countersign-checkpoint+jws");
     expect(verified.payload).toEqual({ size: 4211, root: "abc" });
   });
 
   describe("decodeUnsafe", () => {
     it("reads header and payload without a key", async () => {
       const key = await generateKey(MANDATE_ALG);
-      const jws = await sign({ iss: "https://pramaan.example" }, key, TYP_MANDATE);
+      const jws = await sign({ iss: "https://countersign.example" }, key, TYP_MANDATE);
 
       const { header, payload } = decodeUnsafe(jws);
       expect(header.kid).toBe(key.kid);
-      expect(payload).toEqual({ iss: "https://pramaan.example" });
+      expect(payload).toEqual({ iss: "https://countersign.example" });
     });
 
     it("rejects a malformed compact serialization", () => {

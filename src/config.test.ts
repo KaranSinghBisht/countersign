@@ -3,8 +3,8 @@ import { ConfigError, parseConfig } from "./config.js";
 
 const VALID: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
-  PRAMAAN_BASE_URL: "https://pramaan.example",
-  DATABASE_URL: "postgres://pramaan:pramaan@localhost:5432/pramaan",
+  COUNTERSIGN_BASE_URL: "https://countersign.example",
+  DATABASE_URL: "postgres://countersign:countersign@localhost:5432/countersign",
   RAZORPAY_KEY_ID: "rzp_test_1234567890abcd",
   RAZORPAY_KEY_SECRET: "secret_value_at_least_16",
   RAZORPAY_WEBHOOK_SECRET: "webhook_secret_at_least_16",
@@ -59,7 +59,7 @@ describe("parseConfig", () => {
   });
 
   it("rejects a malformed base URL", () => {
-    expect(() => parseConfig({ ...VALID, PRAMAAN_BASE_URL: "pramaan.example" })).toThrow(
+    expect(() => parseConfig({ ...VALID, COUNTERSIGN_BASE_URL: "countersign.example" })).toThrow(
       ConfigError,
     );
   });

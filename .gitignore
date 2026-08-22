@@ -17,7 +17,7 @@ keys/
 trust.json
 
 # Local artifacts
-.pramaan/
+.countersign/
 export-*.tar.gz
 *.log
 

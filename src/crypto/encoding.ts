@@ -26,7 +26,29 @@ export function b64uDecode(encoded: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]*$/.test(encoded)) {
     throw new Error("not valid base64url: contains padding or non-alphabet characters");
   }
-  return new Uint8Array(Buffer.from(encoded, "base64url"));
+
+  const decoded = new Uint8Array(Buffer.from(encoded, "base64url"));
+
+  // Reject non-canonical trailing bits.
+  //
+  // The final base64url character does not always carry a full 6 bits of
+  // payload — a 64-byte Ed25519 signature encodes to 86 characters, of which
+  // the last contributes only 4. Decoders ignore the surplus bits, so
+  // "...AA" and "...AB" decode to identical bytes. That makes the encoding
+  // malleable: an attacker can produce a different-looking token that
+  // verifies, and any dedupe or replay guard keyed on the encoded string
+  // sees two distinct values for one signature.
+  //
+  // Re-encoding and comparing is the cheapest way to insist that one byte
+  // string has exactly one representation.
+  if (b64u(decoded) !== encoded) {
+    throw new Error(
+      "not canonical base64url: trailing bits are non-zero, so these bytes have " +
+        "more than one encoding",
+    );
+  }
+
+  return decoded;
 }
 
 export function hex(bytes: Uint8Array): string {

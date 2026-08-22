@@ -1,7 +1,7 @@
 /**
  * Canonical JSON — the hashing surface for the whole system.
  *
- * Every hash in Pramaan (record hashes, Merkle leaves, mandate request
+ * Every hash in Countersign (record hashes, Merkle leaves, mandate request
  * bindings, JWS payloads) is taken over the RFC 8785 canonical form of an
  * object rather than whatever `JSON.stringify` happened to emit. JCS pins
  * property order, number formatting and string escaping, which is what lets

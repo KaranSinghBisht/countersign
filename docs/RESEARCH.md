@@ -1,4 +1,4 @@
-# Research — the landscape Pramaan is positioned against
+# Research — the landscape Countersign is positioned against
 
 Compiled Aug 2026. Everything here was verified against primary sources unless marked **UNVERIFIED**.
 

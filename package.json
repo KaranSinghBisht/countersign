@@ -1,5 +1,5 @@
 {
-  "name": "pramaan",
+  "name": "countersign",
   "version": "0.1.0",
   "private": true,
   "description": "A merchant server an AI buyer can discover and buy from, that can prove the agent was never allowed outside its budget.",
@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@11.11.0",
   "bin": {
-    "pramaan": "./dist/cli/index.js"
+    "countersign": "./dist/cli/index.js"
   },
   "scripts": {
     "dev": "tsx watch src/http/server.ts",

@@ -93,13 +93,13 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: pramaan
-          POSTGRES_PASSWORD: pramaan
-          POSTGRES_DB: pramaan
+          POSTGRES_USER: countersign
+          POSTGRES_PASSWORD: countersign
+          POSTGRES_DB: countersign
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pramaan -d pramaan"
+          --health-cmd "pg_isready -U countersign -d countersign"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
@@ -114,5 +114,5 @@ jobs:
 
       - name: Integration tests
         env:
-          DATABASE_URL: postgres://pramaan:pramaan@localhost:5432/pramaan
+          DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
         run: pnpm exec vitest run --project integration --passWithNoTests

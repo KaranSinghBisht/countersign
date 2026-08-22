@@ -63,7 +63,7 @@ export interface LoggerOptions {
  * assert against the real thing rather than a lookalike.
  */
 export function loggerOptions(options: LoggerOptions = {}): PinoOptions {
-  const { level = "info", service = "pramaan" } = options;
+  const { level = "info", service = "countersign" } = options;
 
   return {
     level,

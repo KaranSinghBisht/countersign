@@ -69,9 +69,9 @@ const CANONICAL_CASES: Record<string, JsonValue> = {
   // Shaped like a real closed mandate: money is a string plus a currency,
   // never a number, so no float can ever enter the hashed bytes.
   mandate_like: {
-    vct: "in.pramaan.mandate.spend.1",
+    vct: "dev.countersign.mandate.spend.1",
     iss: "agent:pricing-bot",
-    aud: "https://pramaan.example/agent-commerce",
+    aud: "https://countersign.example/agent-commerce",
     jti: "01K3QF8ZZ0P6QW1E4RT7YUIOPA",
     iat: 1755700421,
     exp: 1755700541,
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   );
 
   const jwsPayload = CANONICAL_CASES.mandate_like as JsonValue;
-  const typ = "application/pramaan-mandate+jws";
+  const typ = "application/countersign-mandate+jws";
 
   const vectors = {
     $comment:

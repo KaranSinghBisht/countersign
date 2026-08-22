@@ -32,7 +32,7 @@ const ConfigSchema = z.object({
    * the 402 challenge, so a mandate minted for another deployment cannot be
    * replayed against this one.
    */
-  PRAMAAN_BASE_URL: z.url(),
+  COUNTERSIGN_BASE_URL: z.url(),
 
   DATABASE_URL: z.url().refine((v) => v.startsWith("postgres"), {
     message: "must be a postgres:// or postgresql:// URL",
