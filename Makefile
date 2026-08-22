@@ -67,9 +67,17 @@ typecheck:
 
 # A live key in a public hackathon repo moves real money. src/config.ts refuses
 # to boot with one; this stops it reaching a commit in the first place.
+#
+# Matches key-SHAPED strings, not the prefix on its own — a scanner that fires
+# on the documentation describing it (or on its own definition) is a scanner
+# somebody disables within a day. Deliberate key-shaped fixtures carry an
+# explicit `pragma: allow-live-key` marker, which is greppable in review.
 ## scan-secrets: fail if a live Razorpay key appears in tracked files
 scan-secrets:
-	@if git grep -nI --cached -e 'rzp_live_' -- . ; then \
+	@matches=$$(git grep -nIE --cached -e 'rzp_live_[A-Za-z0-9]{10,}' -- . \
+		| grep -v 'pragma: allow-live-key' || true); \
+	if [ -n "$$matches" ]; then \
+		echo "$$matches"; \
 		echo "FAIL: a live Razorpay key is staged. This project is test-mode only."; \
 		exit 1; \
 	else \

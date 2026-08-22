@@ -92,7 +92,8 @@ describe("scrubbing inside allow-listed free text", () => {
   });
 
   it("removes a live API key", () => {
-    expect(scrubString("using rzp_live_AbCdEf123456")).toBe("using [redacted:live-key]");
+    const liveKey = "rzp_live_AbCdEf123456"; // pragma: allow-live-key (synthetic)
+    expect(scrubString(`using ${liveKey}`)).toBe("using [redacted:live-key]");
   });
 
   it("leaves ordinary text alone", () => {

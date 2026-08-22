@@ -35,7 +35,8 @@ describe("parseConfig", () => {
   // The interlock that matters most in a public hackathon repo: this codebase
   // creates orders and captures payments.
   it("refuses to start with a live Razorpay key", () => {
-    expect(() => parseConfig({ ...VALID, RAZORPAY_KEY_ID: "rzp_live_1234567890abcd" })).toThrow(
+    const liveKeyId = "rzp_live_1234567890abcd"; // pragma: allow-live-key (synthetic)
+    expect(() => parseConfig({ ...VALID, RAZORPAY_KEY_ID: liveKeyId })).toThrow(
       /refuses to run live/,
     );
   });
