@@ -50,23 +50,31 @@ const KEYS: readonly KeySpec[] = [
 async function main(): Promise<void> {
   const write = process.argv.includes("--write");
   const lines: string[] = [];
-  const trust: Record<string, unknown> = {};
+  const trust: Record<string, unknown> = {
+    $comment:
+      "Public verification keys. Safe to publish. The verifier takes --trust pointing HERE, never a copy packed into an export bundle.",
+    origin: "countersign.dev/audit",
+    audience: "http://localhost:3000",
+    checkpoint_key_name: "countersign.dev/audit",
+    keys: {},
+  };
 
   for (const { variable, alg, purpose } of KEYS) {
     const key = await generateKey(alg);
     lines.push(`${variable}=${b64u(utf8(JSON.stringify(key.privateJwk)))}`);
-    trust[variable] = { alg, kid: key.kid, jwk: key.publicJwk, purpose };
+    (trust.keys as Record<string, unknown>)[variable] = {
+      alg,
+      kid: key.kid,
+      jwk: key.publicJwk,
+      purpose,
+    };
   }
 
   // The public half, in the shape the verifier's --trust flag expects. A
   // verifier that learned its keys from the bundle under inspection would
   // prove nothing, so these have to be distributed out of band.
   const trustPath = join(ROOT, "trust.json");
-  writeFileSync(
-    trustPath,
-    `${JSON.stringify({ $comment: "Public verification keys. Safe to publish.", keys: trust }, null, 2)}\n`,
-    "utf8",
-  );
+  writeFileSync(trustPath, `${JSON.stringify(trust, null, 2)}\n`, "utf8");
 
   if (!write) {
     console.log(lines.join("\n"));

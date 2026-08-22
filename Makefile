@@ -99,10 +99,15 @@ vectors:
 keys:
 	@pnpm exec tsx scripts/gen-keys.ts
 
-# Every name here must have a recipe above. A .PHONY entry whose target lost
-# its recipe becomes a silent no-op that still satisfies `check`, which is how
-# the secret scan spent several commits appearing to pass without running.
-.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make
+## cli: single-file verifier, for handing to a judge on a USB stick
+cli:
+	@mkdir -p dist
+	@pnpm exec esbuild src/cli/index.ts --bundle --platform=node --format=esm \
+		--outfile=dist/countersign.mjs --banner:js="#!/usr/bin/env node"
+	@chmod +x dist/countersign.mjs
+	@echo "wrote dist/countersign.mjs"
+
+.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli
 
 # Guard against exactly that recurring: fail if any .PHONY target has no
 # recipe. `make -pq` prints the database; a real target reports its commands.

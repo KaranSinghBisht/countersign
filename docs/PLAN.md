@@ -191,7 +191,7 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 - [x] Pure function: `decide(bundle, open, closed, checkout, state, now) → Decision`. No clock reads, no RNG, no I/O, no map-iteration-order dependence.
 - [x] Eight constraint types: `amount_range`, `budget` (aggregate), `velocity` (rolling window — **our extension; AP2 only has calendar recurrence**), `max_actions`, `allowed_payees`, `allowed_categories`, `escalation_threshold`, `rail`.
 - [x] Above `escalation_threshold`, return AP2's `unresolved_constraint` — *not* a hard deny. That is the documented protocol path back to a human, and it is our graceful-failure demo.
-- [ ] Package as a standalone module the verifier imports. **Same code, two callers.**
+- [x] Package as a standalone module the verifier imports. **Same code, two callers.**
 
 ### Days 6–7 — State, ledger, idempotency
 
@@ -254,13 +254,13 @@ This is the crown jewel. Budget the full two days.
 
 **Two full days. This is the demo. It is not a stretch goal.**
 
-- [ ] `countersign verify --bundle ./export.tar.gz --trust ./trust.json` — 30 checks across seven groups: log integrity, mandate chain, request binding, temporal/replay, bounds, external corroboration, policy replay.
-- [ ] `trust.json` pins the public keys. **The verifier must never learn a key from the bundle it is checking.** That is the entire point.
-- [ ] Bundle: `records.jsonl`, `checkpoints/`, `mandates/`, `checkouts/`, `policy/`, `receipts/`, `MANIFEST.json`.
-- [ ] `countersign verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `countersign explain --order <id>` (**"every money action explainable" as a literal command**).
-- [ ] `--json`. Exit codes: 0 verified, 1 verification failure, 2 malformed bundle, 3 trust config error.
-- [ ] Failure output names the exact `seq` and the exact delta. Model the UX on `rekor-cli` and `cosign verify`.
-- [ ] **Single-file / static build.** Hand it to a judge on a USB stick.
+- [x] `countersign verify --bundle ./export.tar.gz --trust ./trust.json` — 30 checks across seven groups: log integrity, mandate chain, request binding, temporal/replay, bounds, external corroboration, policy replay.
+- [x] `trust.json` pins the public keys. **The verifier must never learn a key from the bundle it is checking.** That is the entire point.
+- [x] Bundle: `records.jsonl`, `checkpoints/`, `mandates/`, `checkouts/`, `policy/`, `receipts/`, `MANIFEST.json`.
+- [x] `countersign verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `countersign explain --order <id>` (**"every money action explainable" as a literal command**).
+- [x] `--json`. Exit codes: 0 verified, 1 verification failure, 2 malformed bundle, 3 trust config error.
+- [x] Failure output names the exact `seq` and the exact delta. Model the UX on `rekor-cli` and `cosign verify`.
+- [x] **Single-file / static build.** Hand it to a judge on a USB stick.
 
 ### Day 13 — Rehearsed failures
 

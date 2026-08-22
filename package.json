@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@11.11.0",
   "bin": {
-    "countersign": "./dist/cli/index.js"
+    "countersign": "./dist/src/cli/index.js"
   },
   "scripts": {
     "dev": "tsx watch src/http/server.ts",
@@ -39,6 +39,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
     "@types/node": "^24.10.1",
+    "esbuild": "^0.28.2",
     "fast-check": "^4.5.0",
     "pino-pretty": "^13.1.2",
     "tsx": "^4.20.6",
