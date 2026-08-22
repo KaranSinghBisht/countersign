@@ -220,16 +220,21 @@ export const holdPostings = (amount: Money): Posting[] => [
  * Four legs rather than two, because the gross amount and the fee are
  * different facts. The receivable is what Razorpay will actually settle.
  */
-export const capturePostings = (amount: Money, fee: Money): Posting[] => [
-  { account: "asset:authorization_holds", amount: negated(amount) },
-  {
-    account: "asset:razorpay_receivable",
-    amount: money(amount.amount - fee.amount, amount.currency),
-  },
-  { account: "expense:psp_fees", amount: fee },
-  { account: "revenue:sales", amount: negated(amount) },
-  { account: "asset:buyer_receivable", amount },
-];
+export const capturePostings = (amount: Money, fee: Money): Posting[] => {
+  // A zero-fee posting is not a fact, and ledger_entries rejects amount 0
+  // so a "balanced" capture would otherwise fail the check constraint.
+  const postings: Posting[] = [
+    { account: "asset:authorization_holds", amount: negated(amount) },
+    {
+      account: "asset:razorpay_receivable",
+      amount: money(amount.amount - fee.amount, amount.currency),
+    },
+    { account: "revenue:sales", amount: negated(amount) },
+    { account: "asset:buyer_receivable", amount },
+  ];
+  if (fee.amount !== 0n) postings.push({ account: "expense:psp_fees", amount: fee });
+  return postings;
+};
 
 /** A release: the hold is undone and the buyer's receivable restored. */
 export const releasePostings = (amount: Money): Posting[] => [

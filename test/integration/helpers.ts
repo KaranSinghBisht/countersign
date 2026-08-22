@@ -21,6 +21,9 @@ const TABLES = [
   "idempotency_keys",
   "audit_records",
   "checkpoints",
+  "webhook_events",
+  "payments",
+  "outbox",
 ];
 
 /** Build the schema. Safe to call repeatedly; migrations are recorded. */

@@ -222,7 +222,8 @@ This is the crown jewel. Budget the full two days.
       The leaf commits to the record *hash*, so a counterparty holding only a receipt can verify inclusion without being shown the record body.
 - [x] Checkpoints in transparency-dev signed-note format (origin / size / root, blank line, signature), Ed25519. Monotonic `(tree_size, timestamp)` enforced.
       Verification takes the trusted key as a parameter and never reads it from the note. Every checkpoint is retained, not just the newest — republishing a *different* note at a size already published is refused, which is what a split view looks like from the log's own side.
-- [ ] `GET /audit/checkpoint`, `GET /audit/proof?seq=N`, `GET /audit/orders/:id`. **Blocked on the HTTP layer**; the query functions behind them are done and tested.
+- [x] `GET /audit/checkpoint`, `GET /audit/proof?seq=N`, `GET /audit/orders/:id`.
+      Served from what was stored. The checkpoint note is returned verbatim rather than reserialised, because reserialising it would change the bytes the signature covers.
 - [x] **Every record carries `spent_before_paise` / `amount_paise` / `spent_after_paise`.** Three integers that turn record omission from undetectable into detectable — omit a middle record and the running total has a visible discontinuity. Neither AP2 nor Verifiable Intent commits the running total into the evidence; this is ours.
       Demonstrated directly: a test removes a record, repairs `prev_hash` **and** `seq` so the chain is flawless, and the verifier still reports `1000 paise unaccounted for` at the exact sequence number.
 - [x] Log DENY and ESCALATE as carefully as ALLOW, with `first_deny` (the rule ID) and the accounting block showing *what would have happened*.
@@ -230,19 +231,24 @@ This is the crown jewel. Budget the full two days.
 
 ### Day 10 — Razorpay adapter
 
-- [ ] Orders + capture. `receipt` derived deterministically: `"pr" + base32(SHA256(closed_jti ‖ request_hash))[:38]` (40-char limit). A genuine duplicate is now rejected by Razorpay itself even if our logic has a bug.
-- [ ] Payment signature verification (`HMAC-SHA256(order_id|payment_id, key_secret)`), stored — it's an *externally attested* fact.
-- [ ] Webhook endpoint done properly:
+- [x] Orders + capture. `receipt` derived deterministically: `"pr" + base32(SHA256(closed_jti ‖ request_hash))[:38]` (40-char limit). A genuine duplicate is now rejected by Razorpay itself even if our logic has a bug.
+      Inputs are length-prefixed so `("ab","c")` and `("a","bc")` cannot collide. A timed-out create that actually landed is recovered by looking up that receipt, never by minting a new one.
+- [x] Payment signature verification (`HMAC-SHA256(order_id|payment_id, key_secret)`), stored — it's an *externally attested* fact.
+      Length-checked on the decoded bytes, then `timingSafeEqual`. Ids containing `|` are refused so the signed string cannot have its boundary shifted.
+- [x] Webhook endpoint done properly:
       - raw-body middleware **scoped to that route only** (a global `express.json()`/Fastify JSON parser above it is the #1 cause of signature failures)
       - `crypto.timingSafeEqual`, length-checked first
-      - `INSERT … ON CONFLICT DO NOTHING` on `x-razorpay-event-id` — atomic dedupe, not `SELECT`-then-`INSERT`
+      - `INSERT` on `x-razorpay-event-id` — atomic dedupe, not `SELECT`-then-`INSERT`. Concurrent redeliveries: exactly one accepted, the rest 200-duplicate.
       - **200 in under 5 seconds**, all work async. Razorpay times out at 5s and retries; 24h of failures auto-disables the webhook.
       - staleness window of **26 hours**, not Stripe's 5 minutes — copying that number breaks legitimate retries
       - monotonic state rank so out-of-order events are recorded but never regress state. Razorpay explicitly does not guarantee `payment.authorized` precedes `payment.captured`.
-- [ ] `in_doubt` state. **A timeout does not mean the payment failed — it means we do not know.** Transition to `in_doubt`, never `failed`, then query Razorpay by our own reference to resolve. Marking a timed-out charge failed and retrying with a fresh reference is precisely how one purchase becomes two.
-- [ ] Transactional outbox for outbound Razorpay calls. "Write to DB then call the API" is a dual-write bug.
-- [ ] Reconciliation job: pull last 24h from Razorpay, normalize, match, classify into a typed exception list (`MISSING_AT_PSP`, `MISSING_LOCALLY`, `STATE_MISMATCH`, `AMOUNT_MISMATCH`, `IN_DOUBT_UNRESOLVED`, …). Fixes are **new balanced ledger transactions**, never `UPDATE`s.
-- [ ] Use `zrok` for local webhook delivery. Test-mode webhook OTP is `754081`.
+- [x] `in_doubt` state. **A timeout does not mean the payment failed — it means we do not know.** Transition to `in_doubt`, never `failed`, then query Razorpay by our own reference to resolve. Marking a timed-out charge failed and retrying with a fresh reference is precisely how one purchase becomes two.
+- [x] Transactional outbox for outbound Razorpay calls. "Write to DB then call the API" is a dual-write bug.
+      The intent commits with the payment row. Streams are serialized so a capture cannot overtake its create. A timeout queues `resolve_in_doubt` rather than replaying `create_order`.
+- [x] Reconciliation job: pull last 24h from Razorpay, normalize, match, classify into a typed exception list (`MISSING_AT_PSP`, `MISSING_LOCALLY`, `STATE_MISMATCH`, `AMOUNT_MISMATCH`, `IN_DOUBT_UNRESOLVED`, …). Fixes are **new balanced ledger transactions**, never `UPDATE`s.
+      Only `STATE_MISMATCH` is auto-adoptable, and only via the same rank rule the webhook uses. Amount mismatches and missing rows stay on the list — inventing a payment we never intended would make reconciliation a second, quieter writer.
+- [x] Use `zrok` for local webhook delivery. Test-mode webhook OTP is `754081`.
+      Documented in `.env.example`. Razorpay blacklists ngrok and webhook.site; this is operator setup, not something the process can do for you.
 
 ### Days 11–12 — The verifier CLI
 
