@@ -17,14 +17,14 @@
  * and must never be used for anything real.
  */
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonValue } from "../src/crypto/canonical.js";
 import { canonical } from "../src/crypto/canonical.js";
 import { digestJson, digestString } from "../src/crypto/digest.js";
-import { sign } from "../src/crypto/jws.js";
-import { importPrivateKey } from "../src/crypto/keys.js";
+import { sign, verify } from "../src/crypto/jws.js";
+import { importPrivateKey, importPublicKey } from "../src/crypto/keys.js";
 
 /**
  * RFC 8032 §7.1 TEST 1 key material, re-encoded from hex to base64url.
@@ -86,6 +86,48 @@ const DIGEST_STRING_CASES: Record<string, string> = {
   unicode: "₹1,499.00 — देय",
 };
 
+/**
+ * Reuse the committed ES256 signature when it still verifies.
+ *
+ * ES256 is deliberately non-deterministic — AP2 requires it for hash-bound
+ * mandates, see src/crypto/keys.ts — so signing the same payload twice yields
+ * different bytes. Regenerating unconditionally would produce a diff on every
+ * run, which makes "regenerating is a no-op" useless as a CI check and trains
+ * everyone to ignore the noise.
+ *
+ * Reusing a still-valid signature keeps the check meaningful: the file changes
+ * only when the payload, the key, or the canonicalization actually changes.
+ */
+async function stableEs256(
+  existing: string | undefined,
+  key: Awaited<ReturnType<typeof importPrivateKey>>,
+  payload: JsonValue,
+  typ: string,
+): Promise<string> {
+  if (existing !== undefined) {
+    try {
+      const pub = await importPublicKey(key.publicJwk);
+      const verified = await verify(existing, pub, typ);
+      if (canonical(verified.payload as JsonValue) === canonical(payload)) return existing;
+    } catch {
+      // Fall through and re-sign. A stored signature that no longer verifies
+      // is exactly the case this vector should be regenerated for.
+    }
+  }
+  return sign(payload, key, typ);
+}
+
+function readExistingVectors(path: string): {
+  jws?: { es256_must_verify?: { compact?: string } };
+} {
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 async function main(): Promise<void> {
   const ed25519 = await importPrivateKey(FIXED_ED25519_JWK as never, "Ed25519");
   const es256 = await importPrivateKey(FIXED_ES256_JWK as never, "ES256");
@@ -106,6 +148,9 @@ async function main(): Promise<void> {
 
   const jwsPayload = CANONICAL_CASES.mandate_like as JsonValue;
   const typ = "application/countersign-mandate+jws";
+
+  const out = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "vectors", "crypto.json");
+  const previous = readExistingVectors(out);
 
   const vectors = {
     $comment:
@@ -134,16 +179,22 @@ async function main(): Promise<void> {
         compact: await sign(jwsPayload, ed25519, typ),
       },
       // ES256 is deliberately non-deterministic (see keys.ts), so a byte-exact
-      // vector is impossible. This one is asserted to VERIFY, not to match.
+      // vector is impossible. This one is asserted to VERIFY, not to match,
+      // and the committed signature is kept for as long as it still does —
+      // see stableEs256.
       es256_must_verify: {
         typ,
         payload: jwsPayload,
-        compact: await sign(jwsPayload, es256, typ),
+        compact: await stableEs256(
+          previous.jws?.es256_must_verify?.compact,
+          es256,
+          jwsPayload,
+          typ,
+        ),
       },
     },
   };
 
-  const out = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "vectors", "crypto.json");
   writeFileSync(out, `${JSON.stringify(vectors, null, 2)}\n`, "utf8");
   console.log(`wrote ${out}`);
 }

@@ -66,24 +66,8 @@ jobs:
           # key, and the whole point is catching it before it is published.
           fetch-depth: 0
 
-      - name: Scan tracked files for live Razorpay keys
-        run: |
-          if git grep -nIE -e 'rzp_live_[A-Za-z0-9]{10,}' -- . \
-            | grep -v 'pragma: allow-live-key'; then
-            echo "::error::a live Razorpay key is present. This project is test-mode only."
-            exit 1
-          fi
-          echo "ok: no live keys in tracked files"
-
-      - name: Scan full history for live Razorpay keys
-        run: |
-          if git log -p --all \
-            | grep -nE '^\+.*rzp_live_[A-Za-z0-9]{10,}' \
-            | grep -v 'pragma: allow-live-key'; then
-            echo "::error::a live Razorpay key appears in git history. Rotate it now."
-            exit 1
-          fi
-          echo "ok: no live keys in history"
+      - name: Scan tracked files and full history for live Razorpay keys
+        run: ./scripts/scan-secrets.sh --all
 
   integration:
     name: integration tests

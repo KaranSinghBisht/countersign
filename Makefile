@@ -72,17 +72,8 @@ typecheck:
 # on the documentation describing it (or on its own definition) is a scanner
 # somebody disables within a day. Deliberate key-shaped fixtures carry an
 # explicit `pragma: allow-live-key` marker, which is greppable in review.
-## scan-secrets: fail if a live Razorpay key appears in tracked files
-scan-secrets:
-	@matches=$$(git grep -nIE --cached -e 'rzp_live_[A-Za-z0-9]{10,}' -- . \
-		| grep -v 'pragma: allow-live-key' || true); \
-	if [ -n "$$matches" ]; then \
-		echo "$$matches"; \
-		echo "FAIL: a live Razorpay key is staged. This project is test-mode only."; \
-		exit 1; \
-	else \
-		echo "ok: no live keys in tracked files"; \
-	fi
+## scan-secrets:
+	@./scripts/scan-secrets.sh --all
 
 ## vectors: regenerate the cryptographic test vectors (wire-format change)
 vectors:
