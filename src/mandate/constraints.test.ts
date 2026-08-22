@@ -165,9 +165,10 @@ describe("narrows: refuses every widening attempt", () => {
   it("a cap re-denominated into another currency", () => {
     // Without currency in the key this passes: a small USD budget appears to
     // narrow the INR one, and rupee spend is then unconstrained.
-    const child = parentSet()
-      .filter((c) => c.type !== "spend.budget")
-      .concat(parse({ type: "spend.budget", currency: "USD", max: 1 }));
+    const child = [
+      ...parentSet().filter((c) => c.type !== "spend.budget"),
+      parse({ type: "spend.budget", currency: "USD", max: 1 }),
+    ];
 
     expect(narrows(parentSet(), child)).toMatchObject({
       ok: false,
