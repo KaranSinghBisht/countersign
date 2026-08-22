@@ -22,6 +22,10 @@ export default defineConfig({
           pool: "forks",
           poolOptions: { forks: { singleFork: true } },
           testTimeout: 30_000,
+          // Setup hooks talk to Postgres — migrating once and truncating
+          // between tests. The 10s default is tight for the first run against
+          // a cold container.
+          hookTimeout: 30_000,
         },
       },
     ],

@@ -197,12 +197,17 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 
 - [x] Ledger: `ledger_accounts` / `ledger_transactions` / `ledger_entries`. Entries immutable, `REVOKE UPDATE, DELETE`. Deferred constraint trigger enforcing per-transaction balance. Balances **derived**, never a column.
 - [x] Authorization holds modelled as balanced transactions between dedicated accounts, reversed on capture. Keeps the schema append-only with zero special cases. Model `expense:psp_fees` explicitly — it reads as "this person has seen a settlement report."
-- [ ] Idempotency middleware: unique index on `(actor_id, key)`, request fingerprint, lease with reaper, `409` in-flight (+ required `Retry-After`), `422` on same-key-different-body.
+- [x] Idempotency middleware: unique index on `(actor_id, key)`, request fingerprint, lease with reaper, `409` in-flight (+ required `Retry-After`), `422` on same-key-different-body.
       **The key row commits *before* the outbound Razorpay call.** That ordering is the entire guarantee. Any `if (await exists(key))` is a TOCTOU race and a reviewer will spot it instantly.
-- [ ] Spend accounting: `SELECT … FOR UPDATE`, replay guard insert, spend increment, and the audit record **all in one transaction**. If the log can succeed while the spend fails, replay-verification breaks.
-- [ ] Server-issued challenge nonce endpoint. `jti` is agent-chosen, so a compromised agent can pre-mint. The mandate must also commit to a value *we* chose after the request began.
-- [ ] AP2's one-in-flight rule: at most one outstanding authorization per open mandate.
-- [ ] **Concurrency test: 20 parallel requests against a budget that fits 3. Exactly 3 succeed.**
+      The insert *is* the check: a duplicate raises `23505` and the loser reads the winner's row. Fingerprint is compared before state, so a mismatched body is reported even while the first request is still in flight. Expired leases are taken over by a conditional `UPDATE`, so recovery does not depend on the reaper running.
+- [x] Spend accounting: `SELECT … FOR UPDATE`, replay guard insert, spend increment, and the audit record **all in one transaction**. If the log can succeed while the spend fails, replay-verification breaks.
+      Create-and-lock is a single `INSERT … ON CONFLICT DO UPDATE … RETURNING`. The two-step version (`DO NOTHING`, then `SELECT … FOR UPDATE`) deadlocks: the two locks are acquired separately and concurrent callers order them differently. The audit record hooks in via `onDecision`, which runs inside the same transaction.
+- [x] Server-issued challenge nonce endpoint. `jti` is agent-chosen, so a compromised agent can pre-mint. The mandate must also commit to a value *we* chose after the request began.
+      Redemption is one conditional `UPDATE` carrying all three conditions, so the statement both decides and acts.
+- [x] AP2's one-in-flight rule: at most one outstanding authorization per open mandate.
+      A partial unique index on `(open_jti) WHERE state = 'authorized'` — enforced for every writer under every interleaving, rather than checked in application code. Refusal rolls back the replay guard too: nothing was authorised, so the closed mandate has not been spent.
+- [x] **Concurrency test: 20 parallel requests against a budget that fits 3. Exactly 3 succeed.**
+      Verified by mutation: removing only the lock (leaving row creation intact) breaks this test and the contiguous-window test, and nothing else. The winners' `spentBefore`/`spentAfter` pairs tile `0 → 10000 → 20000 → 30000` with no overlap.
 
 ### Days 8–9 — The audit log
 

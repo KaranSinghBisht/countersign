@@ -13,7 +13,7 @@ import {
   releasePostings,
 } from "../../src/ledger/ledger.js";
 import { money, zero } from "../../src/money/money.js";
-import { resetSchema, testDb, testId } from "./helpers.js";
+import { migrateOnce, testDb, testId, truncateAll } from "./helpers.js";
 
 let sql: Sql;
 
@@ -22,7 +22,7 @@ const amount = (minor: bigint) => money(minor, INR);
 
 beforeAll(async () => {
   sql = testDb();
-  await resetSchema(sql);
+  await migrateOnce(sql);
 });
 
 afterAll(async () => {
@@ -30,7 +30,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await resetSchema(sql);
+  await truncateAll(sql);
   await ensureAccounts(sql, INR);
 });
 

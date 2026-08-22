@@ -8,31 +8,83 @@ export function testDb(): Sql {
   return connect({ url: URL, max: 20 });
 }
 
-/**
- * Migrate once, then truncate between tests.
- *
- * `ledger_entries` refuses TRUNCATE by design, so resetting has to drop the
- * schema rather than empty it. That is the trigger doing its job, and the test
- * helper working around it is the expected cost of an append-only table.
- */
-export async function resetSchema(sql: Sql): Promise<void> {
-  await sql.unsafe(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`);
+/** Every table a test might dirty, children first so CASCADE has little to do. */
+const TABLES = [
+  "ledger_entries",
+  "ledger_transactions",
+  "ledger_accounts",
+  "mandate_actions",
+  "mandate_spend",
+  "consumed_mandates",
+  "authorizations",
+  "nonces",
+  "idempotency_keys",
+];
+
+/** Build the schema. Safe to call repeatedly; migrations are recorded. */
+export async function migrateOnce(sql: Sql): Promise<void> {
   await migrate(sql);
 }
 
 /**
- * A unique ULID-shaped identifier. Crockford base32, so no I, L, O or U.
+ * Empty every table between tests.
  *
- * The counter is left-padded INTO the 26 characters rather than appended and
- * then truncated. Appending puts it past the cut, so every id comes out
- * identical and only tests that post twice notice.
+ * `ledger_entries` refuses TRUNCATE by design, so the reset runs with
+ * `session_replication_role = replica`, which suspends user triggers for the
+ * duration. SET LOCAL scopes that to this transaction, so a failure cannot
+ * leave the connection with triggers disabled — which would silently turn off
+ * the append-only guarantee for whatever ran next.
+ *
+ * The earlier version dropped and re-migrated the schema per test. Correct,
+ * but it cost about seven seconds a test and blew the hook timeout.
  */
+export async function truncateAll(sql: Sql): Promise<void> {
+  await sql.begin(async (tx) => {
+    await tx.unsafe("SET LOCAL session_replication_role = replica");
+    await tx.unsafe(`TRUNCATE ${TABLES.join(", ")} RESTART IDENTITY CASCADE`);
+  });
+}
+
+/** Full rebuild. Only needed when a migration itself is under test. */
+export async function resetSchema(sql: Sql): Promise<void> {
+  await sql.unsafe("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+  await migrate(sql);
+}
+
+/**
+ * A unique ULID-shaped identifier, encoded against Crockford's base32
+ * alphabet — which omits I, L, O and U so an id survives transcription.
+ *
+ * Encoded against that alphabet DIRECTLY. The tempting shortcut,
+ * `n.toString(32).toUpperCase()` with the four illegal letters substituted
+ * out, silently merges 18, 21, 24 and 30 onto one character, so four different
+ * counters yield the same id. That surfaced as two unexplained "replayed"
+ * results in a concurrency test that should have had none.
+ *
+ * The counter is also left-padded INTO the 26 characters rather than appended
+ * and truncated; appending puts it past the cut and every id comes out
+ * identical.
+ */
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 let counter = 0;
+const issued = new Set<string>();
+
 export function testId(prefix = "01K3QF"): string {
   counter += 1;
-  const body = counter
-    .toString(32)
-    .toUpperCase()
-    .replace(/[ILOU]/g, "X");
-  return prefix + body.padStart(26 - prefix.length, "0");
+
+  let n = counter;
+  let body = "";
+  do {
+    body = CROCKFORD[n % 32] + body;
+    n = Math.floor(n / 32);
+  } while (n > 0);
+
+  const id = prefix + body.padStart(26 - prefix.length, "0");
+
+  // Cheap, and it turns a subtle wrong-answer failure into an obvious one.
+  if (issued.has(id)) throw new Error(`testId generated a duplicate: ${id}`);
+  issued.add(id);
+
+  return id;
 }
