@@ -1,10 +1,15 @@
+# pnpm 11 requires an explicit decision for every dependency that wants to run
+# an install script, and fails the install until one is recorded. That is the
+# right default — a postinstall script is arbitrary code execution at
+# dependency-resolution time — so the answer is written down here rather than
+# suppressed.
+#
+# esbuild (via vitest and tsx): allowed. Its postinstall only resolves and
+# links the prebuilt platform binary already shipped in @esbuild/<platform>.
+# Denying it leaves the binary unlinked on some platforms.
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
 
-# esbuild ships a prebuilt platform binary in @esbuild/darwin-arm64; its
-# postinstall only relinks that binary, so skipping it is safe and keeps
-# `pnpm install` free of the approve-builds prompt in CI.
-ignoredBuiltDependencies:
-  - esbuild
-
+# `pnpm exec` otherwise re-runs a dependency check before every invocation,
+# which turns each `make test` into a second install resolution.
 verifyDepsBeforeRun: false
