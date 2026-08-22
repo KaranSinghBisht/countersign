@@ -96,7 +96,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # No --passWithNoTests. Integration tests exist now, so a run that finds
+      # none means the glob or the project config broke, and that must fail
+      # rather than report a green build on zero assertions.
       - name: Integration tests
         env:
           DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
-        run: pnpm exec vitest run --project integration --passWithNoTests
+        run: pnpm exec vitest run --project integration

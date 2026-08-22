@@ -34,6 +34,21 @@ up:
 down:
 	@docker compose down
 
+# `down` deliberately keeps the volume, so restarting does not cost you your
+# data. That also means POSTGRES_USER and POSTGRES_DB are only ever read on
+# first initialisation — change either one and every later connection fails
+# authentication against a database still holding the old role. `reset` is the
+# way out, and it destroys the data.
+## reset: recreate the database from empty (DESTROYS DATA)
+reset:
+	@docker compose down -v
+	@docker compose up -d --wait
+	@$(MAKE) --no-print-directory migrate
+
+## migrate: apply pending migrations
+migrate:
+	@pnpm exec tsx scripts/migrate.ts
+
 ## clean: stop containers and delete the database volume
 clean:
 	@docker compose down -v
@@ -51,7 +66,7 @@ test-integration:
 	@pnpm exec vitest run --project integration
 
 ## check: everything CI runs — lint, types, tests, secret scan
-check: lint typecheck test scan-secrets
+check: verify-make lint typecheck test scan-secrets
 
 ## lint: check formatting and lint rules
 lint:
@@ -72,7 +87,8 @@ typecheck:
 # on the documentation describing it (or on its own definition) is a scanner
 # somebody disables within a day. Deliberate key-shaped fixtures carry an
 # explicit `pragma: allow-live-key` marker, which is greppable in review.
-## scan-secrets:
+## scan-secrets: fail if a live Razorpay key is in the tree or in history
+scan-secrets:
 	@./scripts/scan-secrets.sh --all
 
 ## vectors: regenerate the cryptographic test vectors (wire-format change)
@@ -83,4 +99,20 @@ vectors:
 keys:
 	@pnpm exec tsx scripts/gen-keys.ts
 
-.PHONY: help setup up down clean dev test test-integration check lint fix typecheck scan-secrets vectors keys
+# Every name here must have a recipe above. A .PHONY entry whose target lost
+# its recipe becomes a silent no-op that still satisfies `check`, which is how
+# the secret scan spent several commits appearing to pass without running.
+.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make
+
+# Guard against exactly that recurring: fail if any .PHONY target has no
+# recipe. `make -pq` prints the database; a real target reports its commands.
+## verify-make: fail if a declared target has no recipe
+verify-make:
+	@for t in $$(grep '^.PHONY:' Makefile | cut -d: -f2-); do \
+		if [ "$$t" != "help" ] && [ "$$t" != "verify-make" ] && \
+		   ! grep -qE "^$$t:" Makefile; then \
+			echo "FAIL: .PHONY declares '$$t' but no such target is defined"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "ok: every declared target has a definition"

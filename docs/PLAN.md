@@ -195,8 +195,8 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 
 ### Days 6–7 — State, ledger, idempotency
 
-- [ ] Ledger: `ledger_accounts` / `ledger_transactions` / `ledger_entries`. Entries immutable, `REVOKE UPDATE, DELETE`. Deferred constraint trigger enforcing per-transaction balance. Balances **derived**, never a column.
-- [ ] Authorization holds modelled as balanced transactions between dedicated accounts, reversed on capture. Keeps the schema append-only with zero special cases. Model `expense:psp_fees` explicitly — it reads as "this person has seen a settlement report."
+- [x] Ledger: `ledger_accounts` / `ledger_transactions` / `ledger_entries`. Entries immutable, `REVOKE UPDATE, DELETE`. Deferred constraint trigger enforcing per-transaction balance. Balances **derived**, never a column.
+- [x] Authorization holds modelled as balanced transactions between dedicated accounts, reversed on capture. Keeps the schema append-only with zero special cases. Model `expense:psp_fees` explicitly — it reads as "this person has seen a settlement report."
 - [ ] Idempotency middleware: unique index on `(actor_id, key)`, request fingerprint, lease with reaper, `409` in-flight (+ required `Retry-After`), `422` on same-key-different-body.
       **The key row commits *before* the outbound Razorpay call.** That ordering is the entire guarantee. Any `if (await exists(key))` is a TOCTOU race and a reviewer will spot it instantly.
 - [ ] Spend accounting: `SELECT … FOR UPDATE`, replay guard insert, spend increment, and the audit record **all in one transaction**. If the log can succeed while the spend fails, replay-verification breaks.
