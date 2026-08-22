@@ -6,7 +6,7 @@ export default defineConfig({
       {
         test: {
           name: "unit",
-          include: ["src/**/*.test.ts", "test/unit/**/*.test.ts"],
+          include: ["src/**/*.test.ts", "test/unit/**/*.test.ts", "test/no-pii-in-prompt.test.ts"],
           environment: "node",
         },
       },
