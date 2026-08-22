@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# A second push should cancel the first run rather than queue behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Property tests use a fixed seed so a CI failure is reproducible locally
+  # from the log alone, without hunting for the seed that produced it.
+  CI: "true"
+
+jobs:
+  check:
+    name: lint, types, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # --frozen-lockfile: a dependency that resolved differently in CI than
+      # on a laptop is a supply-chain surprise, not a convenience.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint and format
+        run: pnpm exec biome check .
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Unit tests
+        run: pnpm exec vitest run --project unit
+
+      # The vectors pin the exact bytes the standalone verifier must
+      # reproduce. Regenerating must be a no-op; if it is not, a dependency
+      # bump has silently changed the wire format.
+      - name: Cryptographic vectors are reproducible
+        run: |
+          pnpm exec tsx scripts/gen-vectors.ts
+          git diff --exit-code test/vectors/crypto.json \
+            || (echo "::error::crypto vectors changed — this is a wire-format change, commit it deliberately"; exit 1)
+
+  secrets:
+    name: no live credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history: a key removed in the tip commit is still a leaked
+          # key, and the whole point is catching it before it is published.
+          fetch-depth: 0
+
+      - name: Scan tracked files for live Razorpay keys
+        run: |
+          if git grep -nIE -e 'rzp_live_[A-Za-z0-9]{10,}' -- . \
+            | grep -v 'pragma: allow-live-key'; then
+            echo "::error::a live Razorpay key is present. This project is test-mode only."
+            exit 1
+          fi
+          echo "ok: no live keys in tracked files"
+
+      - name: Scan full history for live Razorpay keys
+        run: |
+          if git log -p --all \
+            | grep -nE '^\+.*rzp_live_[A-Za-z0-9]{10,}' \
+            | grep -v 'pragma: allow-live-key'; then
+            echo "::error::a live Razorpay key appears in git history. Rotate it now."
+            exit 1
+          fi
+          echo "ok: no live keys in history"
+
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pramaan
+          POSTGRES_PASSWORD: pramaan
+          POSTGRES_DB: pramaan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pramaan -d pramaan"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Integration tests
+        env:
+          DATABASE_URL: postgres://pramaan:pramaan@localhost:5432/pramaan
+        run: pnpm exec vitest run --project integration --passWithNoTests
