@@ -24,6 +24,7 @@
 
 import type { CryptoKey, JWK } from "jose";
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, importJWK } from "jose";
+import { b64uDecode, concatBytes } from "./encoding.js";
 
 export const SIGNING_ALGORITHMS = ["ES256", "Ed25519"] as const;
 export type SigningAlgorithm = (typeof SIGNING_ALGORITHMS)[number];
@@ -155,4 +156,58 @@ export function publicPartOf(jwk: JWK): JWK {
 /** RFC 7638 thumbprint, base64url. Used as `kid` and as the Web Bot Auth key id. */
 export async function thumbprint(jwk: JWK): Promise<string> {
   return calculateJwkThumbprint(publicPartOf(jwk), "sha256");
+}
+
+/**
+ * The raw public key bytes.
+ *
+ * Ed25519 is the 32-byte `x` parameter; P-256 is the uncompressed SEC1 point,
+ * `0x04 ‖ x ‖ y`. Needed for signed-note key hashes, which are computed over
+ * key bytes rather than over a JWK — a JWK has many encodings and would give a
+ * different key hash depending on how it was serialised.
+ */
+export function publicKeyBytes(jwk: JWK): Uint8Array {
+  if (jwk.kty === "OKP") {
+    if (jwk.x === undefined) throw new KeyError("OKP key is missing its x parameter");
+    return b64uDecode(jwk.x);
+  }
+
+  if (jwk.kty === "EC") {
+    if (jwk.x === undefined || jwk.y === undefined) {
+      throw new KeyError("EC key is missing its x or y parameter");
+    }
+    return concatBytes(Uint8Array.of(0x04), b64uDecode(jwk.x), b64uDecode(jwk.y));
+  }
+
+  throw new KeyError(`cannot extract raw key bytes from a ${String(jwk.kty)} key`);
+}
+
+const RAW_PARAMS = {
+  ES256: { name: "ECDSA", hash: "SHA-256" },
+  Ed25519: { name: "Ed25519" },
+  // The DOM lib is not enabled, so EcdsaParams and Algorithm are unavailable
+  // here. This structural constraint is looser but still enforces the part
+  // that matters: every signing algorithm must have an entry, so adding one
+  // without wiring it up is a compile error rather than a runtime surprise.
+} as const satisfies Record<SigningAlgorithm, { readonly name: string; readonly hash?: string }>;
+
+/**
+ * Sign raw bytes, with no JWS envelope.
+ *
+ * Signed notes commit to their own body text, not to a JWS payload, so the
+ * signature has to cover exactly those bytes. Routing this through `jws.sign`
+ * would sign a base64url-wrapped copy and produce a note nobody else can
+ * verify.
+ */
+export async function signRaw(data: Uint8Array, key: KeyPair): Promise<Uint8Array> {
+  const signature = await crypto.subtle.sign(RAW_PARAMS[key.alg], key.privateKey, data);
+  return new Uint8Array(signature);
+}
+
+export async function verifyRaw(
+  data: Uint8Array,
+  signature: Uint8Array,
+  key: PublicKeyRef,
+): Promise<boolean> {
+  return crypto.subtle.verify(RAW_PARAMS[key.alg], key.key, signature, data);
 }

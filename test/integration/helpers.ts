@@ -19,6 +19,8 @@ const TABLES = [
   "authorizations",
   "nonces",
   "idempotency_keys",
+  "audit_records",
+  "checkpoints",
 ];
 
 /** Build the schema. Safe to call repeatedly; migrations are recorded. */
@@ -42,6 +44,11 @@ export async function truncateAll(sql: Sql): Promise<void> {
   await sql.begin(async (tx) => {
     await tx.unsafe("SET LOCAL session_replication_role = replica");
     await tx.unsafe(`TRUNCATE ${TABLES.join(", ")} RESTART IDENTITY CASCADE`);
+    // audit_head is a singleton control row, not data. Truncating it away
+    // would leave append() with nothing to lock.
+    await tx.unsafe(
+      "UPDATE audit_head SET next_seq = 0, last_hash = 'countersign/v1/genesis' WHERE id = TRUE",
+    );
   });
 }
 

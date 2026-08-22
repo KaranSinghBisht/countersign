@@ -213,13 +213,20 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 
 This is the crown jewel. Budget the full two days.
 
-- [ ] Record schema (§6). Hash chain: `record_hash = b64u(SHA256(JCS(record_sans_hash)))`, `prev_hash` links.
-- [ ] **RFC 6962 Merkle tree, hand-written (~60 lines).** `leaf = SHA256(0x00‖d)`, `node = SHA256(0x01‖l‖r)`. The domain-separation prefixes prevent second-preimage attacks. `merkletreejs` does **not** do this by default — write it yourself and test against known vectors.
-- [ ] Inclusion proofs and consistency proofs.
-- [ ] Checkpoints in transparency-dev signed-note format (origin / size / root, blank line, signature), Ed25519. Monotonic `(tree_size, timestamp)` enforced.
-- [ ] `GET /audit/checkpoint`, `GET /audit/proof?seq=N`, `GET /audit/orders/:id`.
-- [ ] **Every record carries `spent_before_paise` / `amount_paise` / `spent_after_paise`.** Three integers that turn record omission from undetectable into detectable — omit a middle record and the running total has a visible discontinuity. Neither AP2 nor Verifiable Intent commits the running total into the evidence; this is ours.
-- [ ] Log DENY and ESCALATE as carefully as ALLOW, with `first_deny` (the rule ID) and the accounting block showing *what would have happened*.
+- [x] Record schema (§6). Hash chain: `record_hash = b64u(SHA256(JCS(record_sans_hash)))`, `prev_hash` links.
+      `hashRecord` strips `record_hash` rather than assuming it absent: spreading a sealed record into a patch satisfies `UnsealedRecord` structurally while still carrying the old hash, and the resulting record never verifies — a bug that presents as tampering.
+      Sequencing locks a single `audit_head` row. A Postgres `SEQUENCE` is the wrong tool here: it is non-transactional, so a rollback burns a number, and a gap in an audit log is indistinguishable from a deletion.
+- [x] **RFC 6962 Merkle tree, hand-written (~60 lines).** `leaf = SHA256(0x00‖d)`, `node = SHA256(0x01‖l‖r)`. The domain-separation prefixes prevent second-preimage attacks. `merkletreejs` does **not** do this by default — write it yourself and test against known vectors.
+      Tested against the published RFC 6962 vectors for all nine tree sizes. Prove and verify are written from *different* definitions — recursive `PATH`/`PROOF` for proving, the iterative §2.1.1/§2.1.2 algorithms for verifying — so a bug cannot cancel itself out in a round trip. Mutation-verified: dropping the prefixes, splitting at the midpoint, or swapping sibling order each break the vectors.
+- [x] Inclusion proofs and consistency proofs.
+      The leaf commits to the record *hash*, so a counterparty holding only a receipt can verify inclusion without being shown the record body.
+- [x] Checkpoints in transparency-dev signed-note format (origin / size / root, blank line, signature), Ed25519. Monotonic `(tree_size, timestamp)` enforced.
+      Verification takes the trusted key as a parameter and never reads it from the note. Every checkpoint is retained, not just the newest — republishing a *different* note at a size already published is refused, which is what a split view looks like from the log's own side.
+- [ ] `GET /audit/checkpoint`, `GET /audit/proof?seq=N`, `GET /audit/orders/:id`. **Blocked on the HTTP layer**; the query functions behind them are done and tested.
+- [x] **Every record carries `spent_before_paise` / `amount_paise` / `spent_after_paise`.** Three integers that turn record omission from undetectable into detectable — omit a middle record and the running total has a visible discontinuity. Neither AP2 nor Verifiable Intent commits the running total into the evidence; this is ours.
+      Demonstrated directly: a test removes a record, repairs `prev_hash` **and** `seq` so the chain is flawless, and the verifier still reports `1000 paise unaccounted for` at the exact sequence number.
+- [x] Log DENY and ESCALATE as carefully as ALLOW, with `first_deny` (the rule ID) and the accounting block showing *what would have happened*.
+      A refusal leaves the running total where it was, so `spent_after` on a DENY is counterfactual and the *next* record must continue from `spent_before`.
 
 ### Day 10 — Razorpay adapter
 

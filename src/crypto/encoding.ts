@@ -51,6 +51,35 @@ export function b64uDecode(encoded: string): Uint8Array {
   return decoded;
 }
 
+/**
+ * Standard base64, padded.
+ *
+ * Distinct from `b64u` and used only for transparency-dev signed notes, whose
+ * format predates the base64url convention and specifies this alphabet. Mixing
+ * the two up produces notes that other implementations of the format cannot
+ * read, which is the one thing adopting an existing format was meant to avoid.
+ */
+export function b64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+export function b64Decode(encoded: string): Uint8Array {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+    throw new Error("not valid base64: contains non-alphabet characters");
+  }
+
+  const decoded = new Uint8Array(Buffer.from(encoded, "base64"));
+
+  // Same canonicality insistence as b64uDecode: one byte string, one encoding.
+  // Without it a checkpoint could be re-encoded into a different string that
+  // still verifies, and anything keyed on the note text sees two logs.
+  if (b64(decoded) !== encoded) {
+    throw new Error("not canonical base64: these bytes have more than one encoding");
+  }
+
+  return decoded;
+}
+
 export function hex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
 }
