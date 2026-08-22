@@ -92,7 +92,7 @@
         "vct": "dev.countersign.mandate.spend.1",
         "iss": "agent:pricing-bot",
         "aud": "https://countersign.example/agent-commerce",
-        "jti": "01K3QF8ZZ0P6QW1E4RT7YUIOPA",
+        "jti": "01K3QF8ZZ0P6QW1E4RT7YABCDE",
         "iat": 1755700421,
         "exp": 1755700541,
         "amount": {
@@ -103,8 +103,8 @@
           "id": "vnd_1042"
         }
       },
-      "canonical": "{\"amount\":{\"amount\":\"1499000\",\"currency\":\"INR\"},\"aud\":\"https://countersign.example/agent-commerce\",\"exp\":1755700541,\"iat\":1755700421,\"iss\":\"agent:pricing-bot\",\"jti\":\"01K3QF8ZZ0P6QW1E4RT7YUIOPA\",\"payee\":{\"id\":\"vnd_1042\"},\"vct\":\"dev.countersign.mandate.spend.1\"}",
-      "sha256_b64u": "dHbpDWYHdV6kjCVO9f5dOor3KN_Ecoc2SaifUsOcYVY"
+      "canonical": "{\"amount\":{\"amount\":\"1499000\",\"currency\":\"INR\"},\"aud\":\"https://countersign.example/agent-commerce\",\"exp\":1755700541,\"iat\":1755700421,\"iss\":\"agent:pricing-bot\",\"jti\":\"01K3QF8ZZ0P6QW1E4RT7YABCDE\",\"payee\":{\"id\":\"vnd_1042\"},\"vct\":\"dev.countersign.mandate.spend.1\"}",
+      "sha256_b64u": "IR4nJVlDA1nmaMMzr-3CiZVJXITLVgdPM6oApU4cEmo"
     }
   },
   "digest_utf8": {
@@ -151,7 +151,7 @@
         "vct": "dev.countersign.mandate.spend.1",
         "iss": "agent:pricing-bot",
         "aud": "https://countersign.example/agent-commerce",
-        "jti": "01K3QF8ZZ0P6QW1E4RT7YUIOPA",
+        "jti": "01K3QF8ZZ0P6QW1E4RT7YABCDE",
         "iat": 1755700421,
         "exp": 1755700541,
         "amount": {
@@ -162,7 +162,7 @@
           "id": "vnd_1042"
         }
       },
-      "compact": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayIsInR5cCI6ImFwcGxpY2F0aW9uL2NvdW50ZXJzaWduLW1hbmRhdGUrandzIn0.eyJhbW91bnQiOnsiYW1vdW50IjoiMTQ5OTAwMCIsImN1cnJlbmN5IjoiSU5SIn0sImF1ZCI6Imh0dHBzOi8vY291bnRlcnNpZ24uZXhhbXBsZS9hZ2VudC1jb21tZXJjZSIsImV4cCI6MTc1NTcwMDU0MSwiaWF0IjoxNzU1NzAwNDIxLCJpc3MiOiJhZ2VudDpwcmljaW5nLWJvdCIsImp0aSI6IjAxSzNRRjhaWjBQNlFXMUU0UlQ3WVVJT1BBIiwicGF5ZWUiOnsiaWQiOiJ2bmRfMTA0MiJ9LCJ2Y3QiOiJkZXYuY291bnRlcnNpZ24ubWFuZGF0ZS5zcGVuZC4xIn0.n3xegCtfDXFYZ7M3YsrnGtPjVO1vWpBZsMETIb3BC8RvM-yudgiyNV1O9TxuvGeSLiLPhpPflwnaP4KMatvkAA"
+      "compact": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayIsInR5cCI6ImFwcGxpY2F0aW9uL2NvdW50ZXJzaWduLW1hbmRhdGUrandzIn0.eyJhbW91bnQiOnsiYW1vdW50IjoiMTQ5OTAwMCIsImN1cnJlbmN5IjoiSU5SIn0sImF1ZCI6Imh0dHBzOi8vY291bnRlcnNpZ24uZXhhbXBsZS9hZ2VudC1jb21tZXJjZSIsImV4cCI6MTc1NTcwMDU0MSwiaWF0IjoxNzU1NzAwNDIxLCJpc3MiOiJhZ2VudDpwcmljaW5nLWJvdCIsImp0aSI6IjAxSzNRRjhaWjBQNlFXMUU0UlQ3WUFCQ0RFIiwicGF5ZWUiOnsiaWQiOiJ2bmRfMTA0MiJ9LCJ2Y3QiOiJkZXYuY291bnRlcnNpZ24ubWFuZGF0ZS5zcGVuZC4xIn0.4HI5o9E8N4RFvanqhN3yEBMMI4BnGicsqTEtnJ4_f4xJYXzx-yTYXJCs2OgK0yELPauFwiY8RHgqfU0sv9aaDw"
     },
     "es256_must_verify": {
       "typ": "application/countersign-mandate+jws",
@@ -170,7 +170,7 @@
         "vct": "dev.countersign.mandate.spend.1",
         "iss": "agent:pricing-bot",
         "aud": "https://countersign.example/agent-commerce",
-        "jti": "01K3QF8ZZ0P6QW1E4RT7YUIOPA",
+        "jti": "01K3QF8ZZ0P6QW1E4RT7YABCDE",
         "iat": 1755700421,
         "exp": 1755700541,
         "amount": {
@@ -181,7 +181,7 @@
           "id": "vnd_1042"
         }
       },
-      "compact": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjFkZFlmNnlCRzY3LVVQVzhGZG9YWm90bGJqRUNuTlhrUWthTzVnQjk5c0EiLCJ0eXAiOiJhcHBsaWNhdGlvbi9jb3VudGVyc2lnbi1tYW5kYXRlK2p3cyJ9.eyJhbW91bnQiOnsiYW1vdW50IjoiMTQ5OTAwMCIsImN1cnJlbmN5IjoiSU5SIn0sImF1ZCI6Imh0dHBzOi8vY291bnRlcnNpZ24uZXhhbXBsZS9hZ2VudC1jb21tZXJjZSIsImV4cCI6MTc1NTcwMDU0MSwiaWF0IjoxNzU1NzAwNDIxLCJpc3MiOiJhZ2VudDpwcmljaW5nLWJvdCIsImp0aSI6IjAxSzNRRjhaWjBQNlFXMUU0UlQ3WVVJT1BBIiwicGF5ZWUiOnsiaWQiOiJ2bmRfMTA0MiJ9LCJ2Y3QiOiJkZXYuY291bnRlcnNpZ24ubWFuZGF0ZS5zcGVuZC4xIn0.C58tj6SCBw1kjlHTasPiRvKw4q2TsGGqX5Lm7uIfgxbggnWV23nAG2S5QB9mB32sztMeXYavxz5J5FxuL7R-BQ"
+      "compact": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjFkZFlmNnlCRzY3LVVQVzhGZG9YWm90bGJqRUNuTlhrUWthTzVnQjk5c0EiLCJ0eXAiOiJhcHBsaWNhdGlvbi9jb3VudGVyc2lnbi1tYW5kYXRlK2p3cyJ9.eyJhbW91bnQiOnsiYW1vdW50IjoiMTQ5OTAwMCIsImN1cnJlbmN5IjoiSU5SIn0sImF1ZCI6Imh0dHBzOi8vY291bnRlcnNpZ24uZXhhbXBsZS9hZ2VudC1jb21tZXJjZSIsImV4cCI6MTc1NTcwMDU0MSwiaWF0IjoxNzU1NzAwNDIxLCJpc3MiOiJhZ2VudDpwcmljaW5nLWJvdCIsImp0aSI6IjAxSzNRRjhaWjBQNlFXMUU0UlQ3WUFCQ0RFIiwicGF5ZWUiOnsiaWQiOiJ2bmRfMTA0MiJ9LCJ2Y3QiOiJkZXYuY291bnRlcnNpZ24ubWFuZGF0ZS5zcGVuZC4xIn0.h5b-sA9C2YAeD22PBKMOr2BgE5bvHqFTcceMyWhA5e58wO8EPNOSvLkCgX1J59QSmKeGoQMJw53gCf_5xTg5aQ"
     }
   }
 }

@@ -72,7 +72,7 @@ const CANONICAL_CASES: Record<string, JsonValue> = {
     vct: "dev.countersign.mandate.spend.1",
     iss: "agent:pricing-bot",
     aud: "https://countersign.example/agent-commerce",
-    jti: "01K3QF8ZZ0P6QW1E4RT7YUIOPA",
+    jti: "01K3QF8ZZ0P6QW1E4RT7YABCDE",
     iat: 1755700421,
     exp: 1755700541,
     amount: { amount: "1499000", currency: "INR" },

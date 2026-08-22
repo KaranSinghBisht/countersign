@@ -296,7 +296,9 @@ Every one of these must run live, on demand, in under 20 seconds:
 
 **Closed** — agent-signed, per-purchase, ~120s lifetime: `vct`, `iss`, `aud`, `jti` (ULID), `iat`, `exp`, `parent_hash`, `request_hash`, `nonce` (server-issued), `amount` (integer paise), `payee`, and `agent` (`id`, `version`, `model`, `runtime_sha256`).
 
-Two details that matter:
+Three details that matter:
+
+- **`jti` is a ULID, and ULIDs are Crockford base32 — `I`, `L`, `O` and `U` are excluded** so the identifier survives being read aloud or transcribed. An earlier draft of this document used `01K3QF8ZZ0P6QW1E4RT7YUIOPA` as the closed-mandate example, which contains three of the four and is not a valid ULID. The validator caught it; the example was wrong, not the validator.
 
 - **Integer paise everywhere, including constraint bounds.** AP2's own schema says integer minor units but its `amount_range` / `budget` examples show decimals — that is a spec bug. Don't inherit it.
 - **ES256 for mandates, Ed25519 for checkpoints.** AP2 requires a *non-deterministic* signature on hash-bound checkout JWTs, because cart contents are low-entropy and a deterministic signature makes the hash precomputable — an attacker could learn what was purchased from the public identifier alone. That constraint does not apply to checkpoints. Being able to explain *why the two differ* is a strong signal.
