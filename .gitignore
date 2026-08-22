@@ -11,6 +11,11 @@ coverage/
 *.key
 keys/
 
+# Generated per-developer by `make setup`. Holds only public keys, but
+# committing one would suggest the verifier should trust these particular
+# keys — and the verifier's trust must be established out of band.
+trust.json
+
 # Local artifacts
 .pramaan/
 export-*.tar.gz

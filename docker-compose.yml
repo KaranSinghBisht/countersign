@@ -1,0 +1,59 @@
+# Local development environment.
+#
+#   make up
+#
+# Postgres and a trace collector, nothing more. There is no Kubernetes here
+# and no service mesh, because this is one deployable and one worker against
+# one database — and a hackathon project that ships a Helm chart is telling
+# you it optimised for looking distributed rather than being correct.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pramaan-postgres
+    environment:
+      POSTGRES_USER: pramaan
+      POSTGRES_PASSWORD: pramaan
+      POSTGRES_DB: pramaan
+      # Deterministic collation. Sort order participates in the Merkle tree's
+      # leaf ordering, and a locale difference between a developer's machine
+      # and CI would produce a different root for identical data.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `make up` must not return until the database actually accepts queries,
+      # or the first migration races the container's startup.
+      test: ["CMD-SHELL", "pg_isready -U pramaan -d pramaan"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    command:
+      # Verbose logging locally: seeing the actual statement is the difference
+      # between diagnosing a deadlock in a minute and in an hour.
+      - postgres
+      - -c
+      - log_statement=all
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=1s
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: pramaan-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318" # OTLP/HTTP
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
