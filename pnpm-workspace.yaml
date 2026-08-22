@@ -1,0 +1,10 @@
+allowBuilds:
+  esbuild: set this to true or false
+
+# esbuild ships a prebuilt platform binary in @esbuild/darwin-arm64; its
+# postinstall only relinks that binary, so skipping it is safe and keeps
+# `pnpm install` free of the approve-builds prompt in CI.
+ignoredBuiltDependencies:
+  - esbuild
+
+verifyDepsBeforeRun: false
