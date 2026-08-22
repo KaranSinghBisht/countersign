@@ -280,7 +280,7 @@ Every one of these must run live, on demand, in under 20 seconds (`make demo`):
 - [x] README rewritten **last**, why-above-how, ≤250 lines. Scorecard above the fold.
 - [x] `AGENTS.md` at root + nested in `src/gate/`, `src/payments/`, `src/audit/`. Self-score against Razorpay's published three-pillar Agent Readiness rubric (Context / Testing / CI-CD, 80% = Ready) and **publish the table including the gaps we didn't close.**
 - [x] `docs/LIMITATIONS.md` — §7, verbatim, unhedged.
-- [ ] Fresh-clone dry run on a clean machine. Tag `v0.1.0`.
+- [x] Fresh-clone dry run on a clean machine. Tag `v0.1.0`.
 - [x] Defense notes: weakest part, decision I'd reverse, what two more weeks buys, and a walkthrough of the PSP-500 path. **You will be asked.**
 
 ---

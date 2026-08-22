@@ -109,6 +109,7 @@ cli:
 	@pnpm exec esbuild src/cli/index.ts --bundle --platform=node --format=esm \
 		--outfile=dist/countersign.mjs --banner:js="#!/usr/bin/env node"
 	@chmod +x dist/countersign.mjs
+	@./dist/countersign.mjs --help >/dev/null
 	@echo "wrote dist/countersign.mjs"
 
 .PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli demo
