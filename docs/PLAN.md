@@ -162,35 +162,35 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 
 ### Days 1–2 — Foundations you cannot retrofit
 
-- [ ] Repo, `docker-compose.yml` (api, worker, postgres, jaeger), `Makefile` with `help`. `make up` works from a cold clone.
-- [ ] `.env.example` with every key present, placeholder values. Boot-time config validation via Zod; exit non-zero on a missing secret.
-- [ ] **`Money` = branded `bigint` paise + currency.** `allocate()` using largest-remainder. First property test: `sum(allocate(t,w)) === t` for arbitrary `t`, `w`. Do this before any business logic.
-- [ ] Request-ID middleware + structured JSON logging (`pino`) + **allow-list redactor that fails closed**, and `test/redact.test.ts` feeding a synthetic PAN, a JWT, and an email through the logger asserting none survive.
-- [ ] `jose` round-trip: ES256 sign/verify, Ed25519 sign/verify, **RFC 8785 JCS canonicalization byte-identical across writer and verifier**. Golden vectors committed.
-- [ ] Conventional commits from commit #1. You cannot retrofit a git history.
+- [x] Repo, `docker-compose.yml` (api, worker, postgres, jaeger), `Makefile` with `help`. `make up` works from a cold clone.
+- [x] `.env.example` with every key present, placeholder values. Boot-time config validation via Zod; exit non-zero on a missing secret.
+- [x] **`Money` = branded `bigint` paise + currency.** `allocate()` using largest-remainder. First property test: `sum(allocate(t,w)) === t` for arbitrary `t`, `w`. Do this before any business logic.
+- [x] Request-ID middleware + structured JSON logging (`pino`) + **allow-list redactor that fails closed**, and `test/redact.test.ts` feeding a synthetic PAN, a JWT, and an email through the logger asserting none survive.
+- [x] `jose` round-trip: ES256 sign/verify, Ed25519 sign/verify, **RFC 8785 JCS canonicalization byte-identical across writer and verifier**. Golden vectors committed.
+- [x] Conventional commits from commit #1. You cannot retrofit a git history.
 
 > **JCS is the #1 source of late-project pain.** If the verifier is ever a separate program or language, get byte-identical canonicalization working on day one or every hash will fail on day 12.
 
 ### Days 3–4 — The mandate chain and the gate
 
-- [ ] Mandate types (open / closed), claim sets per §5.
-- [ ] `narrows(parent, child)` attenuation predicate. Port the shape from `aws-samples/sample-agentic-delegation`'s `attenuate_scope()` — **including the absent-means-unlimited case**, which is the classic bug:
+- [x] Mandate types (open / closed), claim sets per §5.
+- [x] `narrows(parent, child)` attenuation predicate. Port the shape from `aws-samples/sample-agentic-delegation`'s `attenuate_scope()` — **including the absent-means-unlimited case**, which is the classic bug:
       *a child that omits a cap the parent set must be rejected, not treated as unbounded.*
-- [ ] Chain verification in strict order, abort on first failure:
+- [x] Chain verification in strict order, abort on first failure:
       1. open signature ← **pinned** issuer key (never a key from inside the token)
       2. closed signature ← `open.cnf.jwk` (agent key endorsed by parent, never self-asserted)
       3. `closed.parent_hash == SHA256(open_jws_bytes)`
       4. claims in open unchanged in closed
       5. every constraint evaluates true; **unknown type ⇒ DENY**
       6. `closed.request_hash == SHA256(checkout_jws)` — recomputed from *our* cart, never trusted from the agent
-- [ ] Bidirectional binding + `chain_depth` cap of 2. Unbounded delegation depth is attack surface with no upside.
-- [ ] Unit-test every widening attempt: bigger cap, removed cap, extra payee, deeper chain, spliced parent, reused `cnf`.
+- [x] Bidirectional binding + `chain_depth` cap of 2. Unbounded delegation depth is attack surface with no upside.
+- [x] Unit-test every widening attempt: bigger cap, removed cap, extra payee, deeper chain, spliced parent, reused `cnf`.
 
 ### Day 5 — Policy engine
 
-- [ ] Pure function: `decide(bundle, open, closed, checkout, state, now) → Decision`. No clock reads, no RNG, no I/O, no map-iteration-order dependence.
-- [ ] Eight constraint types: `amount_range`, `budget` (aggregate), `velocity` (rolling window — **our extension; AP2 only has calendar recurrence**), `max_actions`, `allowed_payees`, `allowed_categories`, `escalation_threshold`, `rail`.
-- [ ] Above `escalation_threshold`, return AP2's `unresolved_constraint` — *not* a hard deny. That is the documented protocol path back to a human, and it is our graceful-failure demo.
+- [x] Pure function: `decide(bundle, open, closed, checkout, state, now) → Decision`. No clock reads, no RNG, no I/O, no map-iteration-order dependence.
+- [x] Eight constraint types: `amount_range`, `budget` (aggregate), `velocity` (rolling window — **our extension; AP2 only has calendar recurrence**), `max_actions`, `allowed_payees`, `allowed_categories`, `escalation_threshold`, `rail`.
+- [x] Above `escalation_threshold`, return AP2's `unresolved_constraint` — *not* a hard deny. That is the documented protocol path back to a human, and it is our graceful-failure demo.
 - [ ] Package as a standalone module the verifier imports. **Same code, two callers.**
 
 ### Days 6–7 — State, ledger, idempotency
