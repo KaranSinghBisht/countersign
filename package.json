@@ -2,7 +2,7 @@
   "name": "countersign",
   "version": "0.1.0",
   "private": true,
-  "description": "A merchant server an AI buyer can discover and buy from, that can prove the agent was never allowed outside its budget.",
+  "description": "Merchant-side spend gate and offline verifier. HTTP today is /healthz, /nonce, /purchase, webhooks, and audit export — not a discoverable storefront.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "tsx watch src/http/server.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/http/server.js",
+    "start": "node dist/src/http/server.js",
     "test": "vitest run --project unit",
     "test:watch": "vitest watch --project unit",
     "test:integration": "vitest run --project integration",
@@ -23,9 +23,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "migrate": "tsx src/db/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "export": "tsx scripts/export-bundle.ts"
   },
   "dependencies": {
+    "@fastify/rate-limit": "^11.2.0",
     "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.3.0",
     "canonicalize": "^2.1.0",

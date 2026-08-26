@@ -13,7 +13,7 @@
 
 import { randomBytes } from "node:crypto";
 import { b64u } from "../crypto/encoding.js";
-import type { Sql } from "../db/client.js";
+import type { Sql, TransactionSql } from "../db/client.js";
 
 /** 128 bits. Guessing one inside its lifetime is not a realistic attack. */
 const NONCE_BYTES = 16;
@@ -54,7 +54,7 @@ export type ConsumeResult =
  * decides and acts. A separate SELECT would let two callers each see an
  * unconsumed nonce before either wrote.
  */
-export async function consume(sql: Sql, nonce: string): Promise<ConsumeResult> {
+export async function consume(sql: Sql | TransactionSql, nonce: string): Promise<ConsumeResult> {
   const updated = await sql`
 		UPDATE nonces
 		   SET consumed_at = now()

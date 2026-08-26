@@ -47,6 +47,15 @@ describe("parseConfig", () => {
   });
 
   it("rejects a placeholder secret that is too short to be real", () => {
+    expect(() => parseConfig({ ...VALID, RAZORPAY_KEY_SECRET: "changeme" })).toThrow(/at least 16/);
+  });
+
+  it("boots without the unused 402 challenge secret", () => {
+    const { CHALLENGE_HMAC_SECRET: _omitted, ...withoutChallenge } = VALID;
+    expect(parseConfig(withoutChallenge).CHALLENGE_HMAC_SECRET).toBeUndefined();
+  });
+
+  it("still refuses a short challenge secret if one is supplied", () => {
     expect(() => parseConfig({ ...VALID, CHALLENGE_HMAC_SECRET: "changeme" })).toThrow(
       /at least 16/,
     );

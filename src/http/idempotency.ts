@@ -22,7 +22,7 @@
 
 import type { JsonValue } from "../crypto/canonical.js";
 import { digestJson } from "../crypto/digest.js";
-import { isUniqueViolation, type Sql } from "../db/client.js";
+import { isUniqueViolation, type Sql, type TransactionSql } from "../db/client.js";
 
 /** How long one attempt may hold a key before another may take it over. */
 export const DEFAULT_LEASE_SECONDS = 30;
@@ -126,7 +126,7 @@ export async function claim(sql: Sql, input: ClaimInput): Promise<IdempotencyOut
  * than learning what happened.
  */
 export async function complete(
-  sql: Sql,
+  sql: Sql | TransactionSql,
   actorId: string,
   key: string,
   status: number,
@@ -172,6 +172,23 @@ export async function reapExpiredLeases(sql: Sql): Promise<number> {
   const removed = await sql`
 		DELETE FROM idempotency_keys
 		 WHERE state = 'in_flight' AND lease_expires_at <= now()
+		RETURNING actor_id
+	`;
+  return removed.length;
+}
+
+/**
+ * Drop settled keys past their retention window.
+ *
+ * The replay guarantee is only meant to cover the retry horizon of a live
+ * client, not eternity — and the route is unauthenticated, so without a
+ * bound the table is an open invitation to fill the disk one key at a time.
+ */
+export async function purgeSettled(sql: Sql, retentionHours = 48): Promise<number> {
+  const removed = await sql`
+		DELETE FROM idempotency_keys
+		 WHERE state <> 'in_flight'
+		   AND updated_at <= now() - make_interval(hours => ${retentionHours})
 		RETURNING actor_id
 	`;
   return removed.length;

@@ -4,7 +4,7 @@ import { claim, complete, reapExpiredLeases } from "../../src/http/idempotency.j
 import { balanceOf, ensureAccounts } from "../../src/ledger/ledger.js";
 import { type Constraint, ConstraintSchema } from "../../src/mandate/constraints.js";
 import { money, zero } from "../../src/money/money.js";
-import { attemptSpend, OneInFlightError, spendOf } from "../../src/spend/accounting.js";
+import { attemptSpend, spendOf } from "../../src/spend/accounting.js";
 import { consume, issue } from "../../src/spend/nonce.js";
 import { migrateOnce, testDb, testId, truncateAll } from "./helpers.js";
 
@@ -220,7 +220,7 @@ describe("AP2's one-in-flight rule", () => {
         now: NOW,
         authorizationId: testId(),
       }),
-    ).rejects.toThrow(OneInFlightError);
+    ).resolves.toMatchObject({ outcome: "already_in_flight", openJti });
   });
 
   it("rolls the replay guard back when one-in-flight refuses", async () => {
@@ -248,7 +248,7 @@ describe("AP2's one-in-flight rule", () => {
         now: NOW,
         authorizationId: testId(),
       }),
-    ).rejects.toThrow(OneInFlightError);
+    ).resolves.toMatchObject({ outcome: "already_in_flight", openJti });
 
     const consumed = await sql`SELECT 1 FROM consumed_mandates WHERE closed_jti = ${closedJti}`;
     expect(consumed).toHaveLength(0);

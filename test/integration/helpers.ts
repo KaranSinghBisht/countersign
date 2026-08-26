@@ -24,6 +24,7 @@ const TABLES = [
   "webhook_events",
   "payments",
   "outbox",
+  "mandate_artifacts",
 ];
 
 /** Build the schema. Safe to call repeatedly; migrations are recorded. */

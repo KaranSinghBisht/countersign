@@ -11,7 +11,9 @@
  * own MCP server documentation warns against passing keys that way.
  */
 
+import type { JWK } from "jose";
 import { z } from "zod";
+import { b64uDecode, fromUtf8 } from "./crypto/encoding.js";
 
 const NonEmpty = z.string().trim().min(1);
 
@@ -63,8 +65,12 @@ const ConfigSchema = z.object({
     .min(60)
     .default(26 * 60 * 60),
 
-  /** Derives the stateless 402 challenge HMAC, MPP-style. */
-  CHALLENGE_HMAC_SECRET: Secret,
+  /**
+   * Reserved for a 402 challenge HMAC. Nothing in this tree reads it —
+   * there is no challenge route — so it is optional. If set, it must still
+   * look like a secret, so a pasted `"changeme"` fails closed.
+   */
+  CHALLENGE_HMAC_SECRET: Secret.optional(),
   CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(10).max(900).default(300),
 
   /**
@@ -77,6 +83,12 @@ const ConfigSchema = z.object({
   MANDATE_ISSUER_JWK: NonEmpty,
   AGENT_SIGNING_JWK: NonEmpty,
   CHECKPOINT_JWK: NonEmpty,
+
+  /**
+   * The origin named in signed checkpoint notes. Must match the `origin` a
+   * verifier pins in trust.json, or every exported bundle fails L10.
+   */
+  AUDIT_ORIGIN: NonEmpty.default("countersign.dev/audit"),
 
   /** Mandate lifetimes. Closed mandates are short by design. */
   OPEN_MANDATE_TTL_SECONDS: z.coerce
@@ -141,3 +153,12 @@ export function resetConfigForTesting(): void {
 
 export const isProduction = (c: Config): boolean => c.NODE_ENV === "production";
 export const isTest = (c: Config): boolean => c.NODE_ENV === "test";
+
+/** Decode a base64url-encoded JWK from the environment. */
+export function decodeEnvJwk(encoded: string): JWK {
+  try {
+    return JSON.parse(fromUtf8(b64uDecode(encoded))) as JWK;
+  } catch {
+    throw new ConfigError("signing JWK is not valid base64url JSON");
+  }
+}

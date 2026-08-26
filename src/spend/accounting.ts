@@ -19,7 +19,7 @@
  * is room.
  */
 
-import { isUniqueViolation, type Sql, type TransactionSql } from "../db/client.js";
+import { isUniqueViolation, type Sql, type TransactionSql, withTxn } from "../db/client.js";
 import { holdPostings, post } from "../ledger/ledger.js";
 import type { Constraint } from "../mandate/constraints.js";
 import { type CurrencyCode, type Money, money } from "../money/money.js";
@@ -50,6 +50,16 @@ export interface AttemptInput {
    * independently of the accounting it describes.
    */
   readonly onDecision?: (tx: TransactionSql, outcome: Accounting) => Promise<void>;
+  /**
+   * A human has already approved this purchase. Escalation-threshold
+   * constraints are dropped so `decide()` can permit; every other bound
+   * still applies. Resume path without a separate ACP challenge.
+   *
+   * MUST be set only by an authenticated approval surface. The escalation
+   * threshold is a SIGNED constraint; a flag an unauthenticated caller can
+   * flip is a bypass, which is why no HTTP route plumbs this today.
+   */
+  readonly humanApproved?: boolean;
 }
 
 /**
@@ -76,10 +86,13 @@ export type AttemptResult =
   | { readonly outcome: "replayed"; readonly closedJti: string }
   | { readonly outcome: "already_in_flight"; readonly openJti: string };
 
-export async function attemptSpend(sql: Sql, input: AttemptInput): Promise<AttemptResult> {
+export async function attemptSpend(
+  sql: Sql | TransactionSql,
+  input: AttemptInput,
+): Promise<AttemptResult> {
   const currency = input.request.amount.currency;
 
-  return sql.begin(async (tx) => {
+  return withTxn(sql, async (tx) => {
     // Create-and-lock in ONE statement.
     //
     // The obvious two-step version — INSERT ... ON CONFLICT DO NOTHING,
@@ -145,7 +158,12 @@ export async function attemptSpend(sql: Sql, input: AttemptInput): Promise<Attem
       })),
     };
 
-    const decision = decide(input.constraints, input.request, state, input.now);
+    const constraints =
+      input.humanApproved === true
+        ? input.constraints.filter((c) => c.type !== "spend.escalation_threshold")
+        : input.constraints;
+
+    const decision = decide(constraints, input.request, state, input.now);
 
     const accounting: Accounting = {
       decision,
@@ -167,21 +185,25 @@ export async function attemptSpend(sql: Sql, input: AttemptInput): Promise<Attem
     }
 
     try {
-      await tx`
-				INSERT INTO authorizations (id, open_jti, closed_jti, state, amount_minor, currency)
-				VALUES (
-					${input.authorizationId}, ${input.openJti}, ${input.closedJti},
-					${input.captureImmediately === true ? "captured" : "authorized"},
-					${input.request.amount.amount}, ${currency}
-				)
-			`;
+      await tx.savepoint(async (sp) => {
+        await sp`
+					INSERT INTO authorizations (id, open_jti, closed_jti, state, amount_minor, currency)
+					VALUES (
+						${input.authorizationId}, ${input.openJti}, ${input.closedJti},
+						${input.captureImmediately === true ? "captured" : "authorized"},
+						${input.request.amount.amount}, ${currency}
+					)
+				`;
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         // The partial unique index on (open_jti) WHERE state='authorized'
-        // is AP2's one-in-flight rule. Rolling back here also releases
-        // the replay guard, which is correct: nothing was authorised, so
-        // the closed mandate has not been spent.
-        throw new OneInFlightError(input.openJti);
+        // is AP2's one-in-flight rule. Nothing was authorised, so the
+        // closed mandate has not been spent — drop the replay guard we
+        // inserted above and report the typed outcome instead of aborting
+        // the transaction with a throw.
+        await tx`DELETE FROM consumed_mandates WHERE closed_jti = ${input.closedJti}`;
+        return { outcome: "already_in_flight", openJti: input.openJti };
       }
       throw error;
     }
@@ -211,7 +233,7 @@ export async function attemptSpend(sql: Sql, input: AttemptInput): Promise<Attem
     await input.onDecision?.(tx, accounting);
 
     return { outcome: "permitted", authorizationId: input.authorizationId, ...accounting };
-  }) as Promise<AttemptResult>;
+  });
 }
 
 export class OneInFlightError extends Error {
