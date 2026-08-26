@@ -81,7 +81,13 @@ function p256(key: KeyPair) {
   };
 }
 
-async function signedWorld() {
+async function signedWorld(opts?: {
+  decision?: "ALLOW" | "DENY" | "ESCALATE";
+  firstDeny?: string | null;
+}) {
+  const decision = opts?.decision ?? "ALLOW";
+  const firstDeny =
+    opts?.firstDeny !== undefined ? opts.firstDeny : decision === "ALLOW" ? null : "R-BUD-INR";
   const nonce = "8Zq2_Xw1TbN4pLmR6vKc0A";
   const openJti = "01K3QF7XNZ8VMT4A9YB2CDEFGH";
   const closedJti = "01K3QF8ZZ0P6QW1E4RT7YABCDE";
@@ -162,7 +168,7 @@ async function signedWorld() {
       bundle_sha256: DIGEST,
       engine_version: "0.3.1",
       rules_evaluated: [{ id: "R-BUD-INR", constraint: "spend.budget", effect: "permit" }],
-      first_deny: null,
+      first_deny: firstDeny,
     },
     accounting: {
       spent_before_paise: 0,
@@ -173,7 +179,7 @@ async function signedWorld() {
       budget_max_paise: 25_000_000,
       currency: "INR",
     },
-    decision: "ALLOW",
+    decision,
     reason: "within per-transaction cap and aggregate budget",
     external: {
       rail: "razorpay",
@@ -211,6 +217,7 @@ async function signedWorld() {
     root: hex(treeRoot),
     proof: inclusionProof(0, entries).map(hex),
     checkpoint_note: note,
+    record,
   };
 
   return {
@@ -225,6 +232,36 @@ async function signedWorld() {
     receiptFile,
     requestHash,
   };
+}
+
+function honestCheckout(world: Awaited<ReturnType<typeof signedWorld>>, payee = "vnd_1042") {
+  return {
+    [world.closedJti]: {
+      nonce: world.nonce,
+      checkout: CHECKOUT,
+      request: {
+        amount_paise: 1_499_000,
+        currency: "INR",
+        payee: { id: payee },
+        rail: "razorpay_order",
+      },
+    },
+  };
+}
+
+function writeHonest(
+  dir: string,
+  world: Awaited<ReturnType<typeof signedWorld>>,
+  payee = "vnd_1042",
+) {
+  writeBundle(dir, {
+    records: [world.record],
+    checkpoints: { 1: world.note },
+    mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+    checkouts: honestCheckout(world, payee),
+    receipts: { [world.receipt]: world.receiptFile },
+    policy: { engine_version: "0.3.1", bundle_sha256: DIGEST },
+  });
 }
 
 function writeTrust(dir: string, checkpointKey: KeyPair = checkpoint): string {
@@ -294,6 +331,169 @@ describe("an honest bundle", () => {
     expect(report.ok, formatReport(report)).toBe(true);
     expect(report.passed).toBe(30);
     expect(report.failed).toBe(0);
+  });
+
+  it("fails P1 when decide() would deny the recorded ALLOW", async () => {
+    const world = await signedWorld();
+    const dir = tmp("p1");
+    writeHonest(dir, world, "vnd_attacker");
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "P1")?.ok).toBe(false);
+  });
+
+  it("fails B2 on a DENY record that omitted first_deny", async () => {
+    const world = await signedWorld({ decision: "DENY", firstDeny: null });
+    const dir = tmp("b2");
+    writeHonest(dir, world);
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "B2")?.ok).toBe(false);
+  });
+
+  it("fails L9 when the bundled receipt proof is not the tree's", async () => {
+    const world = await signedWorld();
+    const dir = tmp("l9");
+    writeBundle(dir, {
+      records: [world.record],
+      checkpoints: { 1: world.note },
+      mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+      checkouts: honestCheckout(world),
+      receipts: {
+        [world.receipt]: {
+          ...world.receiptFile,
+          proof: ["00".repeat(32)],
+        },
+      },
+      policy: { engine_version: "0.3.1", bundle_sha256: DIGEST },
+    });
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "L9")?.ok).toBe(false);
+  });
+
+  it("fails L2 when args_sha256 does not match args after resealing", async () => {
+    const world = await signedWorld();
+    const tampered = seal({
+      ...world.record,
+      tool: {
+        ...world.record.tool,
+        args: { amount: 1, currency: "INR", receipt: world.receipt },
+      },
+    });
+    const entries = [utf8(tampered.record_hash)];
+    const note = await signCheckpoint(
+      { origin: ORIGIN, size: 1, rootHash: root(entries) },
+      ORIGIN,
+      checkpoint,
+    );
+    const dir = tmp("args");
+    writeBundle(dir, {
+      records: [tampered],
+      checkpoints: { 1: note },
+      mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+      checkouts: honestCheckout(world),
+      receipts: {
+        [world.receipt]: {
+          ...world.receiptFile,
+          seq: 0,
+          record_hash: tampered.record_hash,
+          tree_size: 1,
+          leaf_hash: hex(leafHash(utf8(tampered.record_hash))),
+          root: hex(root(entries)),
+          proof: inclusionProof(0, entries).map(hex),
+          checkpoint_note: note,
+          record: tampered,
+        },
+      },
+    });
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    const l2 = report.checks.find((c) => c.spec.id === "L2");
+    expect(l2?.ok).toBe(false);
+    expect(l2?.findings.some((f) => f.detail.includes("args_sha256"))).toBe(true);
+  });
+
+  it("fails T2 when a closed jti is reused even if the later record is DENY", async () => {
+    const world = await signedWorld({ decision: "DENY", firstDeny: "R-BUD-INR" });
+    const second = seal({
+      ...world.record,
+      seq: 1,
+      prev_hash: world.record.record_hash,
+      decision: "DENY",
+      policy: { ...world.record.policy, first_deny: "R-BUD-INR" },
+      accounting: {
+        ...world.record.accounting,
+        spent_before_paise: 0,
+        spent_after_paise: 1_499_000,
+        actions_before: 0,
+        actions_after: 1,
+      },
+    });
+    const entries = [utf8(world.record.record_hash), utf8(second.record_hash)];
+    const note = await signCheckpoint(
+      { origin: ORIGIN, size: 2, rootHash: root(entries) },
+      ORIGIN,
+      checkpoint,
+    );
+    const receipt2 = {
+      ...world.receiptFile,
+      seq: 1,
+      record_hash: second.record_hash,
+      tree_size: 2,
+      leaf_hash: hex(leafHash(utf8(second.record_hash))),
+      root: hex(root(entries)),
+      proof: inclusionProof(1, entries).map(hex),
+      checkpoint_note: note,
+      record: second,
+    };
+    const receipt1 = {
+      ...world.receiptFile,
+      tree_size: 2,
+      root: hex(root(entries)),
+      proof: inclusionProof(0, entries).map(hex),
+      checkpoint_note: note,
+    };
+    const dir = tmp("t2");
+    writeBundle(dir, {
+      records: [world.record, second],
+      checkpoints: { 2: note },
+      mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+      checkouts: honestCheckout(world),
+      receipts: {
+        [world.receipt]: receipt1,
+        [`${world.receipt}2`]: receipt2,
+      },
+    });
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "T2")?.ok).toBe(false);
+  });
+
+  it("checks every historical checkpoint root against the log prefix", async () => {
+    const world = await signedWorld();
+    const genesis = await signCheckpoint(
+      { origin: ORIGIN, size: 0, rootHash: new Uint8Array(32).fill(1) },
+      ORIGIN,
+      checkpoint,
+    );
+    const dir = tmp("hist");
+    writeBundle(dir, {
+      records: [world.record],
+      checkpoints: { 0: genesis, 1: world.note },
+      mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+      checkouts: honestCheckout(world),
+      receipts: { [world.receipt]: world.receiptFile },
+    });
+
+    const report = await verifyBundle(loadBundle(dir), await loadPinned(writeTrust(tmp("t"))));
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "L8")?.ok).toBe(false);
   });
 });
 
@@ -482,6 +682,20 @@ describe("trust is out of band", () => {
     expect(report.checks.find((c) => c.spec.id === "L10")?.ok).toBe(false);
   });
 
+  it("does not learn keys from a trust.json sitting in the bundle", async () => {
+    const world = await signedWorld();
+    const dir = tmp("union");
+    writeHonest(dir, world);
+    writeTrust(dir);
+
+    const report = await verifyBundle(
+      loadBundle(dir),
+      await loadPinned(writeTrust(tmp("atk"), attacker)),
+    );
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.spec.id === "L10")?.ok).toBe(false);
+  });
+
   it("rejects a trust file that smuggles a private key", async () => {
     const dir = tmp("priv");
     const path = join(dir, "trust.json");
@@ -522,6 +736,20 @@ describe("verify-receipt", () => {
     const report = await verifyReceiptFile(receiptPath, await loadPinned(writeTrust(tmp("t"))));
     expect(report.ok).toBe(false);
     expect(report.findings.some((f) => f.detail.includes("inclusion"))).toBe(true);
+  });
+
+  it("rejects a receipt whose displayed amount was rewritten", async () => {
+    const world = await signedWorld();
+    const dir = tmp("amount");
+    const forged = { ...world.receiptFile, amount_paise: 1 };
+    writeFileSync(join(dir, "receipt.json"), `${JSON.stringify(forged)}\n`);
+
+    const report = await verifyReceiptFile(
+      join(dir, "receipt.json"),
+      await loadPinned(writeTrust(tmp("t"))),
+    );
+    expect(report.ok).toBe(false);
+    expect(report.findings.some((f) => f.detail.includes("amount_paise"))).toBe(true);
   });
 });
 

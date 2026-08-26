@@ -10,19 +10,26 @@
  */
 
 import {
+  assertExtends,
   type Checkpoint,
   CheckpointError,
   verify as verifyCheckpoint,
 } from "../audit/checkpoint.js";
-import { inclusionProof, leafHash, root, verifyInclusion } from "../audit/merkle.js";
+import { leafHash, root, verifyInclusion } from "../audit/merkle.js";
 import { type AuditRecord, GENESIS_HASH, verifyRecordChain } from "../audit/record.js";
-import type { JsonValue } from "../crypto/canonical.js";
-import { hex, utf8 } from "../crypto/encoding.js";
-import { hashJws, verifyChain } from "../mandate/verify.js";
+import { assertCanonicalizable, type JsonValue } from "../crypto/canonical.js";
+import { digestJson } from "../crypto/digest.js";
+import { hex, hexDecode, utf8 } from "../crypto/encoding.js";
+import { type ChainSuccess, hashJws, verifyChain } from "../mandate/verify.js";
 import { CURRENCIES, type CurrencyCode, money } from "../money/money.js";
 import { decide, type SpendState } from "../policy/engine.js";
 import { deriveReceipt, isWellFormedReceipt } from "../razorpay/receipt.js";
-import type { LoadedBundle } from "./bundle.js";
+import {
+  BoundCartSchema,
+  type CheckoutFile,
+  type LoadedBundle,
+  type ReceiptFile,
+} from "./bundle.js";
 import type { Trust } from "./trust.js";
 
 export const CHECK_GROUPS = [
@@ -142,64 +149,163 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
   byKind("accounting_discontinuity", "L6", "no omitted spend");
   byKind("actions_discontinuity", "L7", "no omitted action");
 
-  const latest = latestCheckpoint(bundle);
+  for (const record of records) {
+    try {
+      assertCanonicalizable(record.tool.args);
+      const actual = digestJson(record.tool.args as JsonValue);
+      if (actual !== record.tool.args_sha256) {
+        fail(
+          "L2",
+          `tool.args_sha256 is ${record.tool.args_sha256}, args hash to ${actual}`,
+          record.seq,
+        );
+      }
+    } catch {
+      fail("L2", "tool.args is not canonical JSON", record.seq);
+    }
+  }
+
+  const notes = [...bundle.checkpoints.entries()].sort(([a], [b]) => a - b);
   let verifiedCheckpoint: { size: number; rootHash: Uint8Array; note: string } | undefined;
 
-  if (latest === undefined) {
+  if (notes.length === 0) {
     fail("L10", "bundle contains no checkpoint");
     fail("L8", "no checkpoint to compare a Merkle root against");
     fail("L9", "no checkpoint to prove inclusion against");
   } else {
-    try {
-      const verified = await verifyCheckpoint(
-        latest.note,
-        trust.origin,
-        trust.checkpointKeyName,
-        trust.checkpoint,
-      );
-      verifiedCheckpoint = { size: verified.size, rootHash: verified.rootHash, note: latest.note };
-      pass("L10", `checkpoint size ${verified.size} verifies`);
+    const verified: { size: number; origin: string; rootHash: Uint8Array }[] = [];
+    let notesOk = true;
 
-      if (verified.size !== records.length) {
-        fail("L8", `checkpoint covers ${verified.size} leaves, log has ${records.length}`);
-      } else {
-        const computed = root(records.map((r) => utf8(r.record_hash)));
-        if (hex(computed) !== hex(verified.rootHash)) {
-          fail("L8", `Merkle root is ${hex(computed)}, checkpoint has ${hex(verified.rootHash)}`);
-        } else {
-          pass("L8", `root ${hex(computed)}`);
+    for (const [filenameSize, note] of notes) {
+      try {
+        const next = await verifyCheckpoint(
+          note,
+          trust.origin,
+          trust.checkpointKeyName,
+          trust.checkpoint,
+        );
+        if (next.size !== filenameSize) {
+          notesOk = false;
+          fail(
+            "L10",
+            `checkpoint filename size ${filenameSize} does not match note size ${next.size}`,
+          );
+          continue;
+        }
+        const previous = verified[verified.length - 1];
+        if (previous !== undefined) {
+          assertExtends(previous, next, new Date(previous.size), new Date(next.size));
+        }
+        verified.push(next);
+      } catch (error) {
+        notesOk = false;
+        const message = error instanceof CheckpointError ? error.message : (error as Error).message;
+        fail("L10", message);
+      }
+    }
+
+    const latest = verified[verified.length - 1];
+    if (notesOk && latest !== undefined) {
+      pass("L10", `checkpoint size ${latest.size} verifies (${verified.length} note(s))`);
+      verifiedCheckpoint = {
+        size: latest.size,
+        rootHash: latest.rootHash,
+        note: notes.at(-1)?.[1] ?? "",
+      };
+
+      let rootsOk = true;
+      for (const cp of verified) {
+        if (cp.size > records.length) {
+          rootsOk = false;
+          fail("L8", `checkpoint covers ${cp.size} leaves, log has ${records.length}`);
+          continue;
+        }
+        const computed = root(records.slice(0, cp.size).map((r) => utf8(r.record_hash)));
+        if (hex(computed) !== hex(cp.rootHash)) {
+          rootsOk = false;
+          fail(
+            "L8",
+            `Merkle root at size ${cp.size} is ${hex(computed)}, checkpoint has ${hex(cp.rootHash)}`,
+          );
         }
       }
-    } catch (error) {
-      const message = error instanceof CheckpointError ? error.message : (error as Error).message;
-      fail("L10", message);
-      fail("L8", `checkpoint unusable: ${message}`);
-      fail("L9", `checkpoint unusable: ${message}`);
+      if (latest.size !== records.length) {
+        rootsOk = false;
+        fail("L8", `latest checkpoint covers ${latest.size} leaves, log has ${records.length}`);
+      }
+      if (rootsOk) pass("L8", `root ${hex(latest.rootHash)}`);
+    } else {
+      fail("L8", "checkpoint unusable: a note did not verify or does not extend");
+      fail("L9", "checkpoint unusable: a note did not verify or does not extend");
     }
   }
 
   if (verifiedCheckpoint !== undefined && verifiedCheckpoint.size === records.length) {
+    const receiptsBySeq = new Map<number, ReceiptFile>();
+    for (const r of bundle.receipts.values()) {
+      if (!receiptsBySeq.has(r.seq)) receiptsBySeq.set(r.seq, r);
+    }
+
     let inclusionFailed = 0;
+    let proved = 0;
     for (const record of records) {
       const leaf = leafHash(utf8(record.record_hash));
-      const recomputed = inclusionProof(
-        record.seq,
-        records.map((r) => utf8(r.record_hash)),
-      );
+      const receipt = receiptsBySeq.get(record.seq);
+      if (receipt === undefined) {
+        // Receipts exist only for permitted purchases — a refusal never
+        // reaches Razorpay, so it has nothing to hold a receipt for. Its
+        // inclusion is already established by L8, which recomputed the
+        // full Merkle root from every record including this one.
+        if (record.decision !== "ALLOW") continue;
+        inclusionFailed += 1;
+        fail("L9", "no inclusion proof in receipts/", record.seq);
+        continue;
+      }
+      if (receipt.record_hash !== record.record_hash) {
+        inclusionFailed += 1;
+        fail("L9", "receipt record_hash does not match the log", record.seq);
+        continue;
+      }
+      if (receipt.tree_size !== verifiedCheckpoint.size) {
+        inclusionFailed += 1;
+        fail(
+          "L9",
+          `receipt proof is for tree_size ${receipt.tree_size}, checkpoint is ${verifiedCheckpoint.size}`,
+          record.seq,
+        );
+        continue;
+      }
+      let proof: Uint8Array[];
+      try {
+        proof = receipt.proof.map(hexDecode);
+      } catch {
+        inclusionFailed += 1;
+        fail("L9", "receipt proof is not hex", record.seq);
+        continue;
+      }
       if (
         !verifyInclusion(
           record.seq,
           verifiedCheckpoint.size,
           leaf,
-          recomputed,
+          proof,
           verifiedCheckpoint.rootHash,
         )
       ) {
         inclusionFailed += 1;
-        fail("L9", "inclusion proof does not verify", record.seq);
+        fail("L9", "inclusion proof in receipts/ does not verify", record.seq);
+      } else {
+        proved += 1;
       }
     }
-    if (inclusionFailed === 0) pass("L9", `proved ${records.length} leaves`);
+    if (inclusionFailed === 0) {
+      pass(
+        "L9",
+        proved > 0
+          ? `proved ${proved} ALLOW leaf(s) from receipts/; refusals covered by the L8 root`
+          : "no ALLOW records; inclusion established by the L8 root recomputation",
+      );
+    }
   }
 
   // ---- mandates ----------------------------------------------------------
@@ -280,8 +386,10 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
 
     if (toolReceipt === undefined) {
       fail("R3", "tool.args.receipt is missing", record.seq);
+      fail("R2", "tool.args.receipt is missing", record.seq);
     } else if (toolReceipt !== derived) {
       fail("R3", `tool.args.receipt is ${toolReceipt}, derived ${derived}`, record.seq);
+      fail("R2", `tool.args.receipt is ${toolReceipt}, derived ${derived}`, record.seq);
     } else {
       pass("R3", derived);
       pass("R2", derived);
@@ -303,7 +411,7 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
     }
 
     const previous = seenClosed.get(record.mandate.closed_jti);
-    if (previous !== undefined && record.decision === "ALLOW") {
+    if (previous !== undefined) {
       fail("T2", `closed jti reused (first seen at seq ${previous})`, record.seq);
     } else {
       seenClosed.set(record.mandate.closed_jti, record.seq);
@@ -336,11 +444,25 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
 
     const receiptFile = bundle.receipts.get(derived);
     if (receiptFile === undefined) {
-      fail("E2", `no receipts/${derived}.json`, record.seq);
+      // A refusal never created a payment, so no receipt file can exist for
+      // it. Only a permitted purchase is required to carry one.
+      if (record.decision === "ALLOW") {
+        fail("E2", `no receipts/${derived}.json`, record.seq);
+      } else {
+        pass("E2", "refusal carries no receipt file, by design");
+      }
     } else if (receiptFile.record_hash !== record.record_hash || receiptFile.seq !== record.seq) {
       fail(
         "E2",
         `receipt file seq=${receiptFile.seq} hash=${receiptFile.record_hash}, record is seq=${record.seq}`,
+        record.seq,
+      );
+    } else if (receiptFile.receipt !== derived) {
+      fail("E2", `receipt file name is ${receiptFile.receipt}, derived ${derived}`, record.seq);
+    } else if (receiptFile.amount_paise !== record.accounting.amount_paise) {
+      fail(
+        "E2",
+        `receipt amount ${receiptFile.amount_paise} ≠ record ${record.accounting.amount_paise}`,
         record.seq,
       );
     } else {
@@ -351,34 +473,14 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
     if (currency === undefined) {
       fail("P1", `ungoverned currency ${record.accounting.currency}`, record.seq);
     } else {
-      const request = {
-        amount: money(BigInt(record.accounting.amount_paise), currency),
-        payee: checkout.request.payee,
-        rail: checkout.request.rail,
-      };
-      const state: SpendState = {
-        spent: money(BigInt(record.accounting.spent_before_paise), currency),
-        actions: record.accounting.actions_before,
-        recent: recentFor(records, record, currency),
-      };
-      const decision = decide(chainResult.constraints, request, state, ts);
-      const expected =
-        record.decision === "ALLOW" ? "permit" : record.decision === "DENY" ? "deny" : "escalate";
-      if (decision.effect !== expected) {
-        fail(
-          "P1",
-          `recorded ${record.decision}, decide() returned ${decision.effect} (${decision.decidedBy ?? "—"})`,
-          record.seq,
-        );
-      } else {
-        pass("P1", decision.decidedBy ?? "permit");
-      }
+      replayPolicy(record, checkout, chainResult, currency, records, ts, pass, fail);
     }
   }
 
+  vacuousBounds(records, findings, pass);
   const seen = new Set(findings.map((f) => f.check));
   for (const spec of CHECKS) {
-    if (!seen.has(spec.id)) pass(spec.id, "n/a");
+    if (!seen.has(spec.id)) fail(spec.id, "not evaluated");
   }
 
   return summarise(findings);
@@ -400,12 +502,98 @@ function summarise(findings: readonly Finding[]): Report {
   return { ok: failed === 0, checks, passed, failed, total: checks.length };
 }
 
-function latestCheckpoint(bundle: LoadedBundle): { size: number; note: string } | undefined {
-  let best: { size: number; note: string } | undefined;
-  for (const [size, note] of bundle.checkpoints) {
-    if (best === undefined || size > best.size) best = { size, note };
+function replayPolicy(
+  record: AuditRecord,
+  checkout: CheckoutFile,
+  chainResult: ChainSuccess,
+  currency: CurrencyCode,
+  records: readonly AuditRecord[],
+  ts: number,
+  pass: (check: string, detail?: string) => void,
+  fail: (check: string, detail: string, seq?: number) => void,
+): void {
+  const parsed = BoundCartSchema.safeParse(checkout.checkout);
+  if (!parsed.success) {
+    fail("P1", "checkout.checkout is not a cart with total_paise", record.seq);
+    return;
   }
-  return best;
+  const bound = parsed.data;
+  const closedAmount = chainResult.closed.amount.amount;
+  const closedPayee = chainResult.closed.payee.id;
+
+  if (bound.total_paise !== record.accounting.amount_paise) {
+    fail(
+      "P1",
+      `record amount ${record.accounting.amount_paise} ≠ hash-bound cart ${bound.total_paise}`,
+      record.seq,
+    );
+    return;
+  }
+  if (closedAmount !== BigInt(bound.total_paise)) {
+    fail("P1", `closed.amount ${closedAmount} ≠ hash-bound cart ${bound.total_paise}`, record.seq);
+    return;
+  }
+  if (checkout.request.amount_paise !== bound.total_paise) {
+    fail(
+      "P1",
+      `checkout.request.amount ${checkout.request.amount_paise} ≠ hash-bound cart ${bound.total_paise}`,
+      record.seq,
+    );
+    return;
+  }
+  if (checkout.request.payee.id !== closedPayee) {
+    fail(
+      "P1",
+      `checkout.request.payee ${checkout.request.payee.id} ≠ closed ${closedPayee}`,
+      record.seq,
+    );
+    return;
+  }
+  if (bound.payee !== undefined && bound.payee.id !== closedPayee) {
+    fail("P1", `cart payee ${bound.payee.id} ≠ closed ${closedPayee}`, record.seq);
+    return;
+  }
+
+  const request = {
+    amount: money(BigInt(bound.total_paise), currency),
+    payee: { id: closedPayee },
+    rail: checkout.request.rail,
+    ...(bound.category !== undefined ? { category: bound.category } : {}),
+  };
+  const state: SpendState = {
+    spent: money(BigInt(record.accounting.spent_before_paise), currency),
+    actions: record.accounting.actions_before,
+    recent: recentFor(records, record, currency),
+  };
+  const decision = decide(chainResult.constraints, request, state, ts);
+  const expected =
+    record.decision === "ALLOW" ? "permit" : record.decision === "DENY" ? "deny" : "escalate";
+  if (decision.effect !== expected) {
+    fail(
+      "P1",
+      `recorded ${record.decision}, decide() returned ${decision.effect} (${decision.decidedBy ?? "—"})`,
+      record.seq,
+    );
+  } else {
+    pass("P1", decision.decidedBy ?? "permit");
+  }
+}
+
+function vacuousBounds(
+  records: readonly AuditRecord[],
+  findings: readonly Finding[],
+  pass: (check: string, detail?: string) => void,
+): void {
+  const seen = new Set(findings.map((f) => f.check));
+  const hasAllowBudget = records.some(
+    (r) => r.decision === "ALLOW" && r.accounting.budget_max_paise !== null,
+  );
+  const hasRefusal = records.some((r) => r.decision === "DENY" || r.decision === "ESCALATE");
+  const hasAllow = records.some((r) => r.decision === "ALLOW");
+
+  if (!seen.has("B1") && !hasAllowBudget) pass("B1", "no ALLOW with a budget");
+  if (!seen.has("B2") && !hasRefusal) pass("B2", "no DENY/ESCALATE records");
+  if (!seen.has("B3") && !hasAllow) pass("B3", "no ALLOW records");
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {

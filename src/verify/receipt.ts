@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { verify as verifyCheckpoint } from "../audit/checkpoint.js";
 import { leafHash, verifyInclusion } from "../audit/merkle.js";
+import { hashRecord } from "../audit/record.js";
 import { hexDecode, utf8 } from "../crypto/encoding.js";
 import { deriveReceipt, isWellFormedReceipt } from "../razorpay/receipt.js";
 import { ReceiptSchema } from "./bundle.js";
@@ -57,6 +58,35 @@ export async function verifyReceiptFile(path: string, trust: Trust): Promise<Rec
     findings.push({ ok: false, detail: "receipt is not well-formed Crockford" });
   } else {
     findings.push({ ok: true, detail: "receipt derives from the mandate and request" });
+  }
+
+  if (hashRecord(r.record) !== r.record_hash || r.record.record_hash !== r.record_hash) {
+    findings.push({
+      ok: false,
+      detail: "embedded record does not hash to record_hash",
+    });
+  } else if (r.record.accounting.amount_paise !== r.amount_paise) {
+    findings.push({
+      ok: false,
+      detail: `amount_paise ${r.amount_paise} ≠ record ${r.record.accounting.amount_paise}`,
+    });
+  } else if (r.record.accounting.currency !== r.currency) {
+    findings.push({
+      ok: false,
+      detail: `currency ${r.currency} ≠ record ${r.record.accounting.currency}`,
+    });
+  } else if ((r.record.external?.order_id ?? null) !== r.order_id) {
+    findings.push({
+      ok: false,
+      detail: `order_id ${r.order_id} ≠ record ${r.record.external?.order_id ?? "null"}`,
+    });
+  } else if ((r.record.external?.payment_id ?? null) !== r.payment_id) {
+    findings.push({
+      ok: false,
+      detail: `payment_id ${r.payment_id} ≠ record ${r.record.external?.payment_id ?? "null"}`,
+    });
+  } else {
+    findings.push({ ok: true, detail: "display fields match the sealed record" });
   }
 
   try {
