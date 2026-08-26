@@ -32,6 +32,13 @@ import {
   zero,
 } from "../money/money.js";
 
+/**
+ * Written into every audit record. The verifier replays `decide()` from this
+ * same module, so the version travels with the evidence rather than being
+ * asserted after the fact.
+ */
+export const ENGINE_VERSION = "0.3.1";
+
 export type Effect = "permit" | "deny" | "escalate";
 
 export interface RuleOutcome {
@@ -145,6 +152,17 @@ function evaluate(
   state: SpendState,
   now: number,
 ): RuleOutcome {
+  // Closed at the type level; this branch is for a forged runtime object
+  // that skipped ConstraintSchema. Unknown types are a deny, never a skip.
+  if (!Object.hasOwn(RULE_PREFIX, c.type)) {
+    return {
+      id: "R-UNK",
+      constraint: c.type,
+      effect: "deny",
+      detail: `unknown constraint type ${String(c.type)}`,
+    };
+  }
+
   const id = ruleId(c);
   const permit = (detail: string): RuleOutcome => ({
     id,
@@ -268,6 +286,8 @@ function evaluate(
         ? permit(`rail ${request.rail} is permitted`)
         : deny(`rail ${request.rail} is not permitted`);
   }
+
+  return deny(`unknown constraint type ${String((c as { type: string }).type)}`);
 }
 
 const fmt = (minor: bigint, currency: CurrencyCode): string => format(money(minor, currency));

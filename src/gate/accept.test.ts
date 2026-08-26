@@ -82,4 +82,24 @@ describe("accept", () => {
       expect(withMessage.decision.decidedBy).toBe(silent.decision.decidedBy);
     }
   });
+
+  it("passes a cart category through to decide()", () => {
+    const constraints = [
+      ...CONSTRAINTS,
+      ConstraintSchema.parse({ type: "spend.allowed_categories", allowed: ["office_supplies"] }),
+    ];
+    const denied = accept(CART, honest, constraints, FRESH, NOW);
+    expect(denied.outcome).toBe("decided");
+    if (denied.outcome === "decided") expect(denied.decision.effect).toBe("deny");
+
+    const permitted = accept(
+      { ...CART, category: "office_supplies" },
+      honest,
+      constraints,
+      FRESH,
+      NOW,
+    );
+    expect(permitted.outcome).toBe("decided");
+    if (permitted.outcome === "decided") expect(permitted.decision.effect).toBe("permit");
+  });
 });

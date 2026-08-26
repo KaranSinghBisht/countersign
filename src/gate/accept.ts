@@ -37,6 +37,7 @@ export interface Cart {
   readonly currency: CurrencyCode;
   readonly payee: { readonly id: string };
   readonly rail: string;
+  readonly category?: string;
 }
 
 export interface PromptCommitment {
@@ -106,6 +107,7 @@ export function accept(
     amount: money(BigInt(cart.total_paise), cart.currency),
     payee: cart.payee,
     rail: cart.rail,
+    ...(cart.category !== undefined ? { category: cart.category } : {}),
   };
 
   return {

@@ -107,6 +107,13 @@ describe("decide: denying", () => {
     expect(d).toMatchObject({ effect: "deny", decidedBy: "R-CUR" });
     expect(d.reason).toMatch(/USD/);
   });
+
+  it("denies an unknown constraint type at runtime", () => {
+    const forged = { type: "spend.unobtainium" } as unknown as Constraint;
+    const d = decide([...CONSTRAINTS, forged], REQUEST, FRESH, NOW);
+    expect(d).toMatchObject({ effect: "deny", decidedBy: "R-UNK" });
+    expect(d.reason).toMatch(/unobtainium/);
+  });
 });
 
 describe("decide: velocity", () => {
