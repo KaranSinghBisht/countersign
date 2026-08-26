@@ -189,7 +189,7 @@ export function verifyRecordChain(records: readonly AuditRecord[]): ChainViolati
   const lastSpend = new Map<string, { after: number; actions: number; seq: number }>();
 
   let previousHash = GENESIS_HASH;
-  let expectedSeq = records[0]?.seq ?? 0;
+  let expectedSeq = 0;
 
   for (const record of records) {
     const parsed = AuditRecordSchema.safeParse(record);
@@ -246,7 +246,17 @@ export function verifyRecordChain(records: readonly AuditRecord[]): ChainViolati
     // Continuity against the previous record for the same mandate. This is
     // the check that makes an omitted record visible.
     const previous = lastSpend.get(record.mandate.open_jti);
-    if (previous !== undefined) {
+    if (previous === undefined) {
+      if (acct.spent_before_paise !== 0) {
+        violations.push({
+          seq: record.seq,
+          kind: "accounting_discontinuity",
+          detail:
+            `first record for ${record.mandate.open_jti} has spent_before ` +
+            `${acct.spent_before_paise}, expected 0 — prior spend is missing`,
+        });
+      }
+    } else {
       if (previous.after !== acct.spent_before_paise) {
         violations.push({
           seq: record.seq,
@@ -299,5 +309,6 @@ export function toPaise(minor: bigint): number {
 
 /** The bytes a verifier hashes. Exposed so a bundle can be checked offline. */
 export function canonicalRecord(record: UnsealedRecord): string {
-  return canonical(record as unknown as JsonValue);
+  const { record_hash: _ignored, ...content } = record as Partial<AuditRecord>;
+  return canonical(content as unknown as JsonValue);
 }

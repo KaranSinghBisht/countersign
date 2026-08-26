@@ -272,29 +272,18 @@ describe("properties", () => {
   });
 
   it("appending never changes what an old inclusion proof proves", () => {
-    // Old proofs stay valid against the old root: a checkpoint handed to a
-    // counterparty last week is still checkable today.
+    // Consistency, not a sliced-tree tautology: the size-m root is a prefix
+    // of the grown tree.
     fc.assert(
-      fc.property(entryList, entryList, fc.nat(), (entries, extra, seed) => {
-        const m = seed % entries.length;
-        const proof = inclusionProof(m, entries);
-        const leaf = leafHash(entries[m] as Uint8Array);
-
-        return verifyInclusion(
-          m,
+      fc.property(entryList, entryList, (entries, extra) => {
+        const grown = [...entries, ...extra];
+        return verifyConsistency(
           entries.length,
-          leaf,
-          proof,
-          root(entries.slice(0, entries.length)),
-        )
-          ? verifyInclusion(
-              m,
-              entries.length,
-              leaf,
-              proof,
-              root([...entries, ...extra].slice(0, entries.length)),
-            )
-          : false;
+          grown.length,
+          root(entries),
+          root(grown),
+          consistencyProof(entries.length, grown),
+        );
       }),
     );
   });

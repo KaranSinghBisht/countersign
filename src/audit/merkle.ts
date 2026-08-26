@@ -47,8 +47,10 @@ export function nodeHash(left: Uint8Array, right: Uint8Array): Uint8Array {
  * parts already committed to.
  */
 function splitPoint(n: number): number {
+  // Multiply rather than shift: `k << 1` is a 32-bit op in JS, so a tree
+  // larger than 2^30 would wrap and split at the wrong place.
   let k = 1;
-  while (k << 1 < n) k <<= 1;
+  while (k * 2 < n) k *= 2;
   return k;
 }
 

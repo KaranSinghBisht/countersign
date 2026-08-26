@@ -219,6 +219,14 @@ export async function publishCheckpoint(
   return { checkpoint, note, createdAt: new Date() };
 }
 
+/** Every published checkpoint, oldest first. The exporter ships all of them. */
+export async function allCheckpoints(sql: Sql): Promise<{ size: number; note: string }[]> {
+  const rows = await sql<{ tree_size: bigint; note: string }[]>`
+		SELECT tree_size, note FROM checkpoints ORDER BY tree_size
+	`;
+  return rows.map((row) => ({ size: Number(row.tree_size), note: row.note }));
+}
+
 export async function latestCheckpoint(sql: Sql): Promise<CheckpointRecord | undefined> {
   const rows = await sql<
     { tree_size: bigint; root_hash: Buffer; note: string; created_at: Date }[]

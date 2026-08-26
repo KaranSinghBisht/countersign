@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type AuditRecord,
+  canonicalRecord,
   GENESIS_HASH,
   hashRecord,
   seal,
@@ -134,6 +135,14 @@ describe("record hashing", () => {
 
     expect(hashRecord(content)).toBe(record_hash);
   });
+
+  it("canonicalRecord strips a stray record_hash the same way hashRecord does", () => {
+    const sealed = seal(draft());
+    const again = canonicalRecord(sealed);
+    const { record_hash: _ignored, ...content } = sealed;
+    expect(again).toBe(canonicalRecord(content));
+    expect(again.includes('"record_hash"')).toBe(false);
+  });
 });
 
 describe("chain verification", () => {
@@ -213,7 +222,21 @@ describe("chain verification", () => {
   it("lets a DENY leave the running total untouched", () => {
     // A refusal spends nothing, so the next record must continue from the
     // total as it stood — not from the amount that was refused.
-    const first = seal(draft({ seq: 0, prev_hash: GENESIS_HASH }));
+    const first = seal(
+      draft({
+        seq: 0,
+        prev_hash: GENESIS_HASH,
+        accounting: {
+          spent_before_paise: 0,
+          amount_paise: 1_499_000,
+          spent_after_paise: 1_499_000,
+          actions_before: 0,
+          actions_after: 1,
+          budget_max_paise: 25_000_000,
+          currency: "INR",
+        },
+      }),
+    );
 
     const denied = seal(
       draft({
@@ -228,11 +251,11 @@ describe("chain verification", () => {
           first_deny: "R-BUD-002",
         },
         accounting: {
-          spent_before_paise: 11_996_000,
+          spent_before_paise: 1_499_000,
           amount_paise: 90_000_000,
-          spent_after_paise: 101_996_000,
-          actions_before: 4,
-          actions_after: 5,
+          spent_after_paise: 91_499_000,
+          actions_before: 1,
+          actions_after: 2,
           budget_max_paise: 25_000_000,
           currency: "INR",
         },
@@ -246,11 +269,11 @@ describe("chain verification", () => {
         seq: 2,
         prev_hash: denied.record_hash,
         accounting: {
-          spent_before_paise: 11_996_000,
+          spent_before_paise: 1_499_000,
           amount_paise: 4_000,
-          spent_after_paise: 12_000_000,
-          actions_before: 4,
-          actions_after: 5,
+          spent_after_paise: 1_503_000,
+          actions_before: 1,
+          actions_after: 2,
           budget_max_paise: 25_000_000,
           currency: "INR",
         },
@@ -275,6 +298,15 @@ describe("chain verification", () => {
             ],
             first_deny: "R-AMT-INR",
           },
+          accounting: {
+            spent_before_paise: 0,
+            amount_paise: 1_499_000,
+            spent_after_paise: 1_499_000,
+            actions_before: 0,
+            actions_after: 1,
+            budget_max_paise: 25_000_000,
+            currency: "INR",
+          },
         }),
       ),
     ]);
@@ -285,7 +317,21 @@ describe("chain verification", () => {
   it("tracks each mandate's running total separately", () => {
     // Interleaved mandates must not be compared against each other, or every
     // busy log looks tampered with.
-    const a = seal(draft({ seq: 0, prev_hash: GENESIS_HASH }));
+    const a = seal(
+      draft({
+        seq: 0,
+        prev_hash: GENESIS_HASH,
+        accounting: {
+          spent_before_paise: 0,
+          amount_paise: 1_499_000,
+          spent_after_paise: 1_499_000,
+          actions_before: 0,
+          actions_after: 1,
+          budget_max_paise: 25_000_000,
+          currency: "INR",
+        },
+      }),
+    );
     const b = seal(
       draft({
         seq: 1,
@@ -304,6 +350,29 @@ describe("chain verification", () => {
     );
 
     expect(verifyRecordChain([a, b])).toEqual([]);
+  });
+
+  it("catches a prefix omission that starts mid-mandate", () => {
+    const records = chain(3);
+    const survivor = records[2] as AuditRecord;
+    const truncated = [
+      seal({
+        ...survivor,
+        seq: 0,
+        prev_hash: GENESIS_HASH,
+      }),
+    ];
+
+    const violations = verifyRecordChain(truncated);
+    expect(violations.map((v) => v.kind)).toContain("accounting_discontinuity");
+    expect(violations.find((v) => v.kind === "accounting_discontinuity")?.detail).toMatch(
+      /expected 0/,
+    );
+  });
+
+  it("requires the log to start at seq 0", () => {
+    const records = chain(2).map((r) => seal({ ...r, seq: r.seq + 5 }));
+    expect(verifyRecordChain(records).map((v) => v.kind)).toContain("non_contiguous_seq");
   });
 
   it("reports every violation, not just the first", () => {
