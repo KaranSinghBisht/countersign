@@ -42,6 +42,28 @@ export function connect(options: ConnectOptions): Sql {
 }
 
 /**
+ * Run `fn` transactionally whether the caller is inside a transaction or not.
+ *
+ * A plain connection opens a transaction; a transaction opens a savepoint, so
+ * a failure rolls back to the caller's boundary rather than aborting their
+ * whole transaction. postgres.js only attaches `savepoint` to the
+ * transaction-scoped sql, which is what makes the runtime check reliable.
+ */
+export async function withTxn<T>(
+  sql: Sql | TransactionSql,
+  fn: (tx: TransactionSql) => Promise<T>,
+): Promise<T> {
+  let result: { value: T } | undefined;
+  const run = async (tx: TransactionSql): Promise<void> => {
+    result = { value: await fn(tx) };
+  };
+  if ("savepoint" in sql) await sql.savepoint(run);
+  else await sql.begin(run);
+  if (result === undefined) throw new Error("transaction produced no result");
+  return result.value;
+}
+
+/**
  * Is this error a unique-constraint violation?
  *
  * Used to turn a race into a decision. Checking whether a row exists and then

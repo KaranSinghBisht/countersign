@@ -57,7 +57,10 @@ export const ACCOUNTS: readonly { id: string; kind: AccountKind }[] = [
   { id: "expense:psp_fees", kind: "expense" },
 ];
 
-export async function ensureAccounts(sql: Sql, currency: CurrencyCode): Promise<void> {
+export async function ensureAccounts(
+  sql: Sql | TransactionSql,
+  currency: CurrencyCode,
+): Promise<void> {
   for (const account of ACCOUNTS) {
     await sql`
 			INSERT INTO ledger_accounts (id, kind, currency)
@@ -221,6 +224,7 @@ export const holdPostings = (amount: Money): Posting[] => [
  * different facts. The receivable is what Razorpay will actually settle.
  */
 export const capturePostings = (amount: Money, fee: Money): Posting[] => {
+  assertSameCurrency(amount, fee);
   // A zero-fee posting is not a fact, and ledger_entries rejects amount 0
   // so a "balanced" capture would otherwise fail the check constraint.
   const postings: Posting[] = [
@@ -242,4 +246,30 @@ export const releasePostings = (amount: Money): Posting[] => [
   { account: "asset:buyer_receivable", amount },
 ];
 
+/**
+ * A refund after capture: reverse the sale. Fee 0 means the PSP kept it
+ * (receivable drops by the gross; the fee expense stays). A non-zero fee
+ * reverses the fee as well, matching a full capture unwind.
+ */
+export const refundPostings = (amount: Money, fee: Money): Posting[] => {
+  assertSameCurrency(amount, fee);
+  const postings: Posting[] = [
+    { account: "revenue:sales", amount },
+    {
+      account: "asset:razorpay_receivable",
+      amount: money(-(amount.amount - fee.amount), amount.currency),
+    },
+  ];
+  if (fee.amount !== 0n) postings.push({ account: "expense:psp_fees", amount: negated(fee) });
+  return postings;
+};
+
 const negated = (m: Money): Money => money(-m.amount, m.currency);
+
+const assertSameCurrency = (amount: Money, fee: Money): void => {
+  if (fee.currency !== amount.currency) {
+    throw new LedgerError(
+      `fee currency ${fee.currency} does not match amount currency ${amount.currency}`,
+    );
+  }
+};
