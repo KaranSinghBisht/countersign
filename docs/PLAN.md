@@ -5,6 +5,8 @@
 **Submission:** Razorpay AI Buildathon, Track 01 — AI Growth & Agentic Commerce
 **Judging bar (verbatim):** *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
 
+> **Status, 2026-08-26.** This file is the locked design from day 0. The as-built product is [README.md](../README.md). Section 1 still states the original thesis (ACP, 402, discoverable merchant). Those were not shipped. HTTP today is `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. A real purchase writes the audit record in the same transaction as the spend, the worker publishes checkpoints, and `make export` writes the live log as a bundle the offline CLI verifies (`test/integration/export.test.ts` is the end-to-end proof). Unchecked items in §4 are the ones that would mislead a judge who treats this file as a shipping list.
+
 ---
 
 ## 1. The thesis
@@ -162,10 +164,11 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
 
 ### Days 1–2 — Foundations you cannot retrofit
 
-- [x] Repo, `docker-compose.yml` (api, worker, postgres, jaeger), `Makefile` with `help`. `make up` works from a cold clone.
+- [x] Repo, `docker-compose.yml` (postgres, jaeger — not api/worker), `Makefile` with `help`. `make up` works from a cold clone.
 - [x] `.env.example` with every key present, placeholder values. Boot-time config validation via Zod; exit non-zero on a missing secret.
 - [x] **`Money` = branded `bigint` paise + currency.** `allocate()` using largest-remainder. First property test: `sum(allocate(t,w)) === t` for arbitrary `t`, `w`. Do this before any business logic.
-- [x] Request-ID middleware + structured JSON logging (`pino`) + **allow-list redactor that fails closed**, and `test/redact.test.ts` feeding a synthetic PAN, a JWT, and an email through the logger asserting none survive.
+- [x] Structured JSON logging (`pino`) + **allow-list redactor that fails closed**, and `src/telemetry/redact.test.ts` feeding a synthetic PAN, a JWT, and an email through the logger asserting none survive.
+- [ ] Request-ID middleware on the Fastify app. `AsyncLocalStorage` exists in the logger; nothing on the HTTP surface binds it.
 - [x] `jose` round-trip: ES256 sign/verify, Ed25519 sign/verify, **RFC 8785 JCS canonicalization byte-identical across writer and verifier**. Golden vectors committed.
 - [x] Conventional commits from commit #1. You cannot retrofit a git history.
 
@@ -202,8 +205,8 @@ Assume ~6 focused hours/day. Days 13–14 are presentation and buffer — **do n
       The insert *is* the check: a duplicate raises `23505` and the loser reads the winner's row. Fingerprint is compared before state, so a mismatched body is reported even while the first request is still in flight. Expired leases are taken over by a conditional `UPDATE`, so recovery does not depend on the reaper running.
 - [x] Spend accounting: `SELECT … FOR UPDATE`, replay guard insert, spend increment, and the audit record **all in one transaction**. If the log can succeed while the spend fails, replay-verification breaks.
       Create-and-lock is a single `INSERT … ON CONFLICT DO UPDATE … RETURNING`. The two-step version (`DO NOTHING`, then `SELECT … FOR UPDATE`) deadlocks: the two locks are acquired separately and concurrent callers order them differently. The audit record hooks in via `onDecision`, which runs inside the same transaction.
-- [x] Server-issued challenge nonce endpoint. `jti` is agent-chosen, so a compromised agent can pre-mint. The mandate must also commit to a value *we* chose after the request began.
-      Redemption is one conditional `UPDATE` carrying all three conditions, so the statement both decides and acts.
+- [x] Server-issued challenge nonce library (`src/spend/nonce.ts`). Redemption is one conditional `UPDATE` carrying all three conditions, so the statement both decides and acts.
+- [x] Challenge nonce HTTP endpoint: `POST /nonce`, consumed inside the purchase transaction. `CHALLENGE_HMAC_SECRET` remains unused (the 402 challenge route was cut); the nonce table plus a worker reaper is the shipped design.
 - [x] AP2's one-in-flight rule: at most one outstanding authorization per open mandate.
       A partial unique index on `(open_jti) WHERE state = 'authorized'` — enforced for every writer under every interleaving, rather than checked in application code. Refusal rolls back the replay guard too: nothing was authorised, so the closed mandate has not been spent.
 - [x] **Concurrency test: 20 parallel requests against a budget that fits 3. Exactly 3 succeed.**
@@ -257,7 +260,7 @@ This is the crown jewel. Budget the full two days.
 - [x] `countersign verify --bundle ./export.tar.gz --trust ./trust.json` — 30 checks across seven groups: log integrity, mandate chain, request binding, temporal/replay, bounds, external corroboration, policy replay.
 - [x] `trust.json` pins the public keys. **The verifier must never learn a key from the bundle it is checking.** That is the entire point.
 - [x] Bundle: `records.jsonl`, `checkpoints/`, `mandates/`, `checkouts/`, `policy/`, `receipts/`, `MANIFEST.json`.
-- [x] `countersign verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `countersign explain --order <id>` (**"every money action explainable" as a literal command**).
+- [x] `countersign verify-receipt` (standalone, no log needed — this is the artifact a counterparty actually holds) and `countersign explain --bundle <dir|tar.gz> --order <id>` (**"every money action explainable" as a literal command**).
 - [x] `--json`. Exit codes: 0 verified, 1 verification failure, 2 malformed bundle, 3 trust config error.
 - [x] Failure output names the exact `seq` and the exact delta. Model the UX on `rekor-cli` and `cosign verify`.
 - [x] **Single-file / static build.** Hand it to a judge on a USB stick.
@@ -267,7 +270,8 @@ This is the crown jewel. Budget the full two days.
 Every one of these must run live, on demand, in under 20 seconds (`make demo`):
 
 - [x] **Budget exceeded** → DENY with the rule ID, and the log record showing `spent_before + amount > budget_max`.
-- [x] **Escalation** → `unresolved_constraint` → human approval → resume. The documented AP2 path, not something we invented.
+- [x] **Escalation** → `unresolved_constraint` (`R-ESC-INR`). The documented AP2 signal, not a silent deny.
+- [ ] Human approval → resume. The rehearsal stops at the escalate decision — deliberately. The resume hook exists in the library (`attemptSpend`'s `humanApproved`) but no HTTP route carries it, because an unauthenticated body flag would let the agent strip its own signed escalation constraint. See LIMITATIONS §12.
 - [x] **Tamper, naive** → `sed` one amount in `records.jsonl`, re-run verifier, fail on hash mismatch at an exact seq.
 - [x] **Tamper, sophisticated** → recompute the whole hash chain after the edit so the chain is *internally consistent*, re-run, **still fail** on the checkpoint. This is what distinguishes us from the AWS sample's unsigned chain hash.
 - [x] **Omission** → delete a middle record and renumber, re-run, fail on the running-total discontinuity.

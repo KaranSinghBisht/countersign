@@ -15,13 +15,19 @@ agent proposal
   src/policy/engine.ts   decide() — pure; same module the verifier imports
       │
       ▼
-  src/spend/accounting.ts  lock, replay guard, increment, onDecision — one txn
+  src/payments/purchase.ts ONE txn: nonce burn, spend, audit record,
+      │                    mandate artifacts, payment intent, idempotency
+      ▼
+  src/spend/accounting.ts  lock, replay guard, increment, onDecision
       │
       ▼
   src/razorpay/settle.ts   intend + outbox; timeout → in_doubt, never failed
       │
       ▼
   src/audit/log.ts         hash chain + RFC 6962 tree + Ed25519 checkpoint
+      │                    (worker publishes a checkpoint when the log grows)
+      ▼
+  src/audit/export-live.ts the sealed prefix as a bundle (`make export`)
       │
       ▼
   src/verify/              30 checks, --trust pinned, USB-stick CLI
@@ -43,11 +49,11 @@ The LLM is not a principal. It cannot reach `decide()`. A prompt injection that 
 
 **Outbound calls go through a transactional outbox.** Write-then-call is a dual-write bug. Streams are serialized so a capture cannot overtake its create.
 
-**Webhooks see the raw body.** A global JSON parser is the usual cause of signature failures. Dedupe is `INSERT` on `x-razorpay-event-id`. State is monotonic; deliveries are unordered. The staleness window is 26 hours, because Razorpay retries for 24.
+**Webhooks see the raw body.** A global JSON parser is the usual cause of signature failures. Dedupe is an `INSERT` keyed on the SHA-256 of the signed bytes — the `x-razorpay-event-id` header rides outside the signature, so a captured body replayed under fresh ids is still one event. State is monotonic; deliveries are unordered. The staleness window is 26 hours, because Razorpay retries for 24.
 
 ## What is not in the box
 
-Discovery (ACP / UCP / `/agents.md`), a catalog, an MCP tool surface, and a 402 challenge route are designed and not shipped. HTTP today is `/healthz`, `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
+Discovery (ACP / UCP / `/agents.md`), a catalog, an MCP tool surface, and a 402 challenge route are designed and not shipped. HTTP today is `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
 
 That is the weakest part of the submission. See below.
 
@@ -76,8 +82,10 @@ In order, and none of it is a dashboard:
 1. `/.well-known/acp.json`, `/agents.md`, `/llms.txt`, and one ACP checkout session over the gate that already exists.
 2. WebAuthn on the consent step, so the issuer key lives on a device.
 3. POST each checkpoint to an endpoint we do not control. Completeness stays unprovable; equivocation becomes detectable.
-4. An HTTP export of the audit bundle, so `make cli` is running against a real purchase, not `src/demo/sample-bundle.ts`.
+4. An authenticated approval surface for the escalation resume path — a signed approval token bound to the closed mandate's `jti` — so `unresolved_constraint` stops being terminal over HTTP.
 5. Wire `src/prompt/projection.ts` to an actual model call and keep `test/no-pii-in-prompt.test.ts` as the lock.
+
+(An earlier version of this list included "an export of the audit bundle from real purchases." That shipped: `make export` and `test/integration/export.test.ts`.)
 
 ### Walk through a Razorpay 500
 

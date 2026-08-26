@@ -26,6 +26,12 @@ Copied from the build plan §7 so a reviewer does not have to hunt.
 
 10. **Not audited, not formally verified.** For calibration: Biscuit — a far more mature project — states in its own FAQ that neither its spec nor implementations have been formally audited, and RFC 6962 is Experimental, not Standards Track.
 
+11. **`actor_id` is self-asserted.** The purchase route is unauthenticated; the actor id only namespaces idempotency keys. Purchase authority comes entirely from the signed mandate chain, so a forged actor id cannot spend — but a caller who guesses another actor's id *and* exact idempotency key can grief that one retry into a 422. Remedy: authenticate the surface (mTLS or a bearer bound to the mandate's `sub`) and derive the namespace server-side.
+
+12. **Escalation is terminal over HTTP.** `spend.escalation_threshold` returns AP2's `unresolved_constraint`, and there the wire path ends: the resume hook exists in the library (`attemptSpend`'s `humanApproved`) but no route exposes it, because approval carried by an unauthenticated request body would let the agent strip its own signed constraint. Remedy: an authenticated approval surface — a signed approval token bound to the closed mandate's `jti` — before the flag is ever reachable from outside.
+
+13. **Abuse controls are single-node.** The per-IP rate limit on `/nonce` and `/purchase` is in-memory, and housekeeping (nonce purge, idempotency retention) runs on the worker's timer. Multiple replicas would each keep their own counters. Remedy: a shared store for both, once there is more than one box.
+
 ---
 
 What this list is not: a promise that the next two weeks close it. See `docs/ARCHITECTURE.md` for what those two weeks would actually buy, and for the one decision we would reverse.
