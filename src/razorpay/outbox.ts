@@ -79,6 +79,7 @@ export async function claim(
 		 WHERE id = (
 			SELECT id FROM outbox
 			 WHERE state IN ('pending', 'in_doubt')
+			   AND NOT (kind = 'create_order' AND state = 'in_doubt')
 			   AND next_attempt_at <= now()
 			   AND (lease_expires_at IS NULL OR lease_expires_at <= now())
 			   AND NOT EXISTS (
@@ -86,6 +87,15 @@ export async function claim(
 				 WHERE other.stream = outbox.stream
 				   AND other.state = 'in_flight'
 				   AND other.lease_expires_at > now()
+			   )
+			   AND NOT (
+				kind = 'capture_payment'
+				AND EXISTS (
+					SELECT 1 FROM outbox earlier
+					 WHERE earlier.stream = outbox.stream
+					   AND earlier.kind IN ('create_order', 'resolve_in_doubt')
+					   AND earlier.state IN ('pending', 'in_doubt', 'in_flight')
+				)
 			   )
 			 ORDER BY created_at
 			 FOR UPDATE SKIP LOCKED

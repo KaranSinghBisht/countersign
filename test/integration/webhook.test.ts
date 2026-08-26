@@ -185,6 +185,21 @@ describe("deduplication", () => {
     expect((await deliver(envelope("payment.captured"), "evt_1")).status).toBe(200);
   });
 
+  it("treats the same signed body under a fresh event id as a duplicate", async () => {
+    // The event-id header rides OUTSIDE the signature. If it were the only
+    // dedupe key, one captured body could be replayed forever with fresh
+    // ids, each copy passing verification and landing as a new row.
+    const body = envelope("payment.captured");
+    await deliver(body, "evt_original");
+
+    expect(await deliver(body, "evt_replayed")).toMatchObject({
+      outcome: "duplicate",
+      status: 200,
+    });
+
+    expect(await sql`SELECT 1 FROM webhook_events`).toHaveLength(1);
+  });
+
   it("admits exactly one of many concurrent redeliveries", async () => {
     // The reason dedupe is an INSERT rather than a SELECT then an INSERT.
     const body = envelope("payment.captured");
@@ -233,6 +248,19 @@ describe("staleness", () => {
     ).toMatchObject({ outcome: "stale" });
   });
 
+  it("honours an operator-supplied staleness window", async () => {
+    const body = envelope("payment.captured", { created_at: NOW - 120 });
+    const result = await ingest(sql, {
+      rawBody: body,
+      signature: signAsRazorpay(body, SECRET),
+      eventId: "evt_short",
+      secret: SECRET,
+      now: NOW,
+      maxAgeSeconds: 60,
+    });
+    expect(result).toMatchObject({ outcome: "stale" });
+  });
+
   it("accepts an event with no timestamp", async () => {
     const body = utf8(
       JSON.stringify({
@@ -252,6 +280,22 @@ describe("applying events", () => {
 
     const [processed] = await processPending(sql);
 
+    expect(processed).toMatchObject({ applied: true });
+    expect(await stateOf()).toBe("captured");
+  });
+
+  it("applies order.paid via the order id when the event has no payment entity", async () => {
+    await seedPayment("authorized");
+    const body = utf8(
+      JSON.stringify({
+        event: "order.paid",
+        created_at: NOW - 10,
+        payload: { order: { entity: { id: ORDER_ID, status: "paid" } } },
+      }),
+    );
+    await deliver(body, "evt_paid");
+
+    const [processed] = await processPending(sql);
     expect(processed).toMatchObject({ applied: true });
     expect(await stateOf()).toBe("captured");
   });
@@ -322,6 +366,33 @@ describe("applying events", () => {
 
     expect(processed?.applied).toBe(false);
     expect(processed?.outcome).toContain("no local payment");
+  });
+
+  it("does not poison an event that arrived before we stored the order id", async () => {
+    await sql`
+      INSERT INTO payments (receipt, authorization_id, open_jti, closed_jti, amount_minor, currency, state)
+      VALUES (
+        ${deriveReceipt(testId(), "R9dS1SLLLZQzHVeYm8dQ8Zc9Zc1kxZq2wPQKmxDxzZ8")},
+        ${testId()}, ${testId()}, ${testId()},
+        10000, 'INR', 'created'
+      )
+    `;
+    await deliver(envelope("payment.captured"), "evt_race");
+
+    const [first] = await processPending(sql);
+    expect(first?.applied).toBe(false);
+    expect(first?.outcome).toMatch(/waiting for order_id/);
+
+    const pending = await sql<{ processed_at: Date | null }[]>`
+      SELECT processed_at FROM webhook_events WHERE event_id = 'evt_race'
+    `;
+    expect(pending[0]?.processed_at).toBeNull();
+
+    await sql`UPDATE payments SET order_id = ${ORDER_ID} WHERE order_id IS NULL`;
+
+    const [second] = await processPending(sql);
+    expect(second?.applied).toBe(true);
+    expect(await stateOf()).toBe("captured");
   });
 
   it("marks an unmodelled event processed rather than retrying it forever", async () => {

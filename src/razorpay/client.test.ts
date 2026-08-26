@@ -24,6 +24,8 @@ describe("live Razorpay client", () => {
       fetch: async (input, init) => {
         expect(String(input)).toBe("https://api.razorpay.com/v1/orders");
         expect(init?.method).toBe("POST");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("Idempotency-Key")).toBe("prTEST");
         const body = JSON.parse(String(init?.body));
         expect(body).toMatchObject({
           amount: 1499,
@@ -121,5 +123,37 @@ describe("live Razorpay client", () => {
     await razorpay.listOrders({ from: 1, to: 2 });
 
     expect(authorization).toBe(`Basic ${Buffer.from(`${KEY}:${SECRET}`).toString("base64")}`);
+  });
+
+  it("pages listOrders past the first 100 items", async () => {
+    const urls: string[] = [];
+    const page = (count: number, skip: number) => ({
+      items: Array.from({ length: count }, (_, i) => ({
+        id: `order_${skip + i}`,
+        amount: 100,
+        currency: "INR",
+        receipt: `pr${skip + i}`,
+        status: "created",
+        created_at: 1_755_700_500,
+      })),
+      count,
+    });
+
+    const razorpay = liveRazorpay({
+      keyId: KEY,
+      keySecret: SECRET,
+      fetch: async (input) => {
+        urls.push(String(input));
+        const url = new URL(String(input));
+        const skip = Number(url.searchParams.get("skip") ?? "0");
+        if (skip === 0) return respond(200, page(100, 0));
+        return respond(200, page(3, 100));
+      },
+    });
+
+    const orders = await razorpay.listOrders({ from: 1, to: 9 });
+    expect(orders).toHaveLength(103);
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toContain("skip=100");
   });
 });

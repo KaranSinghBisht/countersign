@@ -19,8 +19,9 @@
  *   - events are recorded whether or not they change anything.
  */
 
+import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { Sql } from "../db/client.js";
+import type { Sql, TransactionSql } from "../db/client.js";
 import { isUniqueViolation } from "../db/client.js";
 import { applyRemoteState } from "./settle.js";
 import { verifyWebhookSignature } from "./signature.js";
@@ -46,6 +47,8 @@ const EntitySchema = z
     status: z.string().optional(),
     amount: z.number().optional(),
     currency: z.string().optional(),
+    /** PSP fee in minor units; present on payment.captured payloads. */
+    fee: z.number().optional(),
   })
   .loose();
 
@@ -79,6 +82,8 @@ export interface IngestInput {
   readonly secret: string;
   /** Seconds since the epoch. Injected so staleness is testable. */
   readonly now: number;
+  /** Override the 26-hour default. Operators set WEBHOOK_MAX_AGE_SECONDS. */
+  readonly maxAgeSeconds?: number;
 }
 
 /**
@@ -116,14 +121,15 @@ export async function ingest(sql: Sql, input: IngestInput): Promise<IngestResult
   }
 
   const createdAt = envelope.created_at;
+  const maxAge = input.maxAgeSeconds ?? STALENESS_WINDOW_SECONDS;
   if (createdAt !== undefined) {
     const age = input.now - createdAt;
 
-    if (age > STALENESS_WINDOW_SECONDS) {
+    if (age > maxAge) {
       return {
         status: 400,
         outcome: "stale",
-        detail: `event is ${age}s old, beyond the ${STALENESS_WINDOW_SECONDS}s window`,
+        detail: `event is ${age}s old, beyond the ${maxAge}s window`,
       };
     }
 
@@ -141,13 +147,18 @@ export async function ingest(sql: Sql, input: IngestInput): Promise<IngestResult
   const payment = envelope.payload.payment?.entity;
   const order = envelope.payload.order?.entity;
 
+  // Dedupe on the SIGNED bytes, not just the event-id header. The header
+  // rides outside the signature, so a captured body could be replayed with
+  // fresh ids forever — every copy verifying, every copy a new row.
+  const bodySha256 = createHash("sha256").update(input.rawBody).digest("hex");
+
   try {
     await sql`
-			INSERT INTO webhook_events (event_id, event, payment_id, order_id, raw_body, signature)
+			INSERT INTO webhook_events (event_id, event, payment_id, order_id, raw_body, signature, body_sha256)
 			VALUES (
 				${input.eventId}, ${envelope.event},
 				${payment?.id ?? null}, ${payment?.order_id ?? order?.id ?? null},
-				${Buffer.from(input.rawBody)}, ${input.signature}
+				${Buffer.from(input.rawBody)}, ${input.signature}, ${bodySha256}
 			)
 		`;
   } catch (error) {
@@ -203,16 +214,33 @@ export async function processPending(sql: Sql, limit = 100): Promise<ProcessedEv
   const results: ProcessedEvent[] = [];
 
   for (const row of pending) {
-    results.push(await processOne(sql, row));
+    const processed = await sql.begin(async (tx) => {
+      const locked = await tx<PendingRow[]>`
+				SELECT event_id, event, payment_id, order_id, raw_body
+				  FROM webhook_events
+				 WHERE event_id = ${row.event_id}
+				   AND processed_at IS NULL
+				 FOR UPDATE SKIP LOCKED
+			`;
+      const claimed = locked[0];
+      if (claimed === undefined) return undefined;
+      return processOne(tx, claimed);
+    });
+    if (processed !== undefined) results.push(processed);
   }
 
   return results;
 }
 
-async function processOne(
-  sql: Sql,
-  row: { event_id: string; event: string; payment_id: string | null; order_id: string | null },
-): Promise<ProcessedEvent> {
+interface PendingRow {
+  event_id: string;
+  event: string;
+  payment_id: string | null;
+  order_id: string | null;
+  raw_body: Uint8Array;
+}
+
+async function processOne(sql: Sql | TransactionSql, row: PendingRow): Promise<ProcessedEvent> {
   const target = EVENT_STATES[row.event];
 
   const settle = async (applied: boolean, outcome: string): Promise<ProcessedEvent> => {
@@ -227,7 +255,9 @@ async function processOne(
   // An event we do not model is still an event we received. Marking it
   // processed with an explanation beats retrying it until the end of time.
   if (target === undefined) return settle(false, `unhandled event type ${row.event}`);
-  if (row.payment_id === null) return settle(false, "event carries no payment id");
+  if (row.payment_id === null && !(row.event === "order.paid" && row.order_id !== null)) {
+    return settle(false, "event carries no payment id");
+  }
 
   // Prefer order_id: that is our local join key from the moment create_order
   // returns. payment_id is only known after Checkout, so an event that arrives
@@ -241,27 +271,99 @@ async function processOne(
     )[0]?.order_id;
 
   if (orderId === null || orderId === undefined) {
-    return settle(false, `no local payment for ${row.payment_id}`);
+    return unmatched(sql, row, settle);
   }
 
   const before = (
     await sql<{ state: string }[]>`SELECT state FROM payments WHERE order_id = ${orderId}`
   )[0];
-  if (before === undefined) return settle(false, `no local payment for ${row.payment_id}`);
+  if (before === undefined) return unmatched(sql, row, settle);
   if (!isPaymentState(before.state)) {
     return settle(false, `local payment is in unknown state ${before.state}`);
   }
 
-  const result = await applyRemoteState(sql, orderId, row.payment_id, target);
+  const paymentId =
+    row.payment_id ??
+    (
+      await sql<{ payment_id: string | null }[]>`
+				SELECT payment_id FROM payments WHERE order_id = ${orderId}
+			`
+    )[0]?.payment_id;
+  if (paymentId === null || paymentId === undefined) {
+    return unmatched(sql, row, settle);
+  }
+
+  // The PSP fee rides inside the SIGNED payload. Using it here matters when
+  // this webhook beats our own capture-API response: the ledger post id for
+  // the capture goes to whoever applies first, and a capture posted with fee
+  // 0 loses the fee expense forever — the later, fee-bearing post collides
+  // and is swallowed as a duplicate.
+  const feeMinor = target === "captured" ? feeFrom(row.raw_body) : 0n;
+
+  const result = await applyRemoteState(sql, orderId, paymentId, target, feeMinor);
   const transition = advance(before.state, target);
   const contradictory = isContradictory(before.state, target);
 
-  if (!result.applied) return settle(false, transition.reason);
+  if (!result.applied) {
+    // `advance` would happily report "created → refunded" for the refused
+    // contradictory pair, which reads as if it were applied. Say what
+    // actually happened instead.
+    return settle(
+      false,
+      contradictory
+        ? `refused ${target}: refund with no local capture (payment is ${before.state})`
+        : transition.reason,
+    );
+  }
 
-  return settle(
-    true,
-    contradictory
-      ? `${before.state} → ${result.next} (refund with no local capture)`
-      : `${before.state} → ${result.next}`,
-  );
+  return settle(true, `${before.state} → ${result.next}`);
+}
+
+function feeFrom(rawBody: Uint8Array): bigint {
+  try {
+    const envelope = WebhookEnvelopeSchema.parse(JSON.parse(new TextDecoder().decode(rawBody)));
+    const fee = envelope.payload.payment?.entity.fee;
+    return typeof fee === "number" && Number.isSafeInteger(fee) && fee >= 0 ? BigInt(fee) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * A miss is either a stranger (Razorpay has a payment we never intended —
+ * mark processed, reconciliation owns it) or a race: we have a local row
+ * whose `order_id` is still null because `rememberOrder` has not committed.
+ * Marking that race processed is a poison pill. Leave it pending.
+ */
+async function unmatched(
+  sql: Sql | TransactionSql,
+  row: { event_id: string; payment_id: string | null },
+  settle: (applied: boolean, outcome: string) => Promise<ProcessedEvent>,
+): Promise<ProcessedEvent> {
+  const inflight = await sql`
+		SELECT 1 FROM payments
+		 WHERE order_id IS NULL
+		   AND state IN ('created', 'authorized')
+		 LIMIT 1
+	`;
+  if (inflight.length > 0) {
+    // Waiting is only worth it while the race can still resolve. The queue
+    // is oldest-first with a LIMIT, so one permanently stuck payment plus a
+    // backlog of stranger events would starve everything behind them; after
+    // an hour the race explanation is no longer credible.
+    const young = await sql`
+			SELECT 1 FROM webhook_events
+			 WHERE event_id = ${row.event_id}
+			   AND received_at > now() - interval '1 hour'
+		`;
+    if (young.length > 0) {
+      return {
+        eventId: row.event_id,
+        applied: false,
+        outcome: `no local payment for ${row.payment_id} (waiting for order_id)`,
+      };
+    }
+    return settle(false, `no local payment for ${row.payment_id}; gave up waiting for order_id`);
+  }
+  return settle(false, `no local payment for ${row.payment_id}`);
 }

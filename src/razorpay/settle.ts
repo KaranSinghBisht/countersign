@@ -8,8 +8,8 @@
 
 import type { JsonValue } from "../crypto/canonical.js";
 import type { Sql, TransactionSql } from "../db/client.js";
-import { isUniqueViolation } from "../db/client.js";
-import { capturePostings, post } from "../ledger/ledger.js";
+import { isUniqueViolation, withTxn } from "../db/client.js";
+import { capturePostings, post, refundPostings, releasePostings } from "../ledger/ledger.js";
 import { type CurrencyCode, money } from "../money/money.js";
 import {
   type Razorpay,
@@ -30,7 +30,7 @@ import {
 } from "./outbox.js";
 import { deriveReceipt } from "./receipt.js";
 import { verifyPaymentSignature } from "./signature.js";
-import { advance, isPaymentState, type PaymentState } from "./state.js";
+import { advance, isContradictory, isPaymentState, type PaymentState } from "./state.js";
 
 export interface IntendInput {
   readonly authorizationId: string;
@@ -71,7 +71,7 @@ export async function intendPayment(
 
   const payload: JsonValue = {
     receipt,
-    amount_minor: Number(input.amountMinor),
+    amount_minor: input.amountMinor.toString(),
     currency: input.currency,
   };
 
@@ -138,8 +138,17 @@ export async function drainOne(sql: Sql, razorpay: Razorpay): Promise<DrainResul
     }
   } catch (error) {
     if (error instanceof RazorpayTimeout) {
-      await markInDoubt(sql, claimed.id, error.message);
       await flagPayment(sql, receiptOf(claimed.payload), error.message);
+      // A timed-out create must not be claimable again. markInDoubt would
+      // put it back on the queue in 15s and drainOne would call createOrder
+      // a second time — a new Razorpay order, same receipt. Fail the create
+      // row; only resolve_in_doubt may run. Other kinds can still sit in
+      // doubt and be retried as themselves.
+      if (claimed.kind === "create_order") {
+        await fail(sql, claimed.id, error.message);
+      } else {
+        await markInDoubt(sql, claimed.id, error.message);
+      }
       return { id: claimed.id, kind: claimed.kind, outcome: "in_doubt", detail: error.message };
     }
 
@@ -202,11 +211,11 @@ async function createOrder(
   _attempts: number,
 ): Promise<DrainResult> {
   const receipt = receiptOf(payload);
-  const amount = numberField(payload, "amount_minor");
+  const amount = minorField(payload, "amount_minor");
   const currency = stringField(payload, "currency");
 
   const order = await razorpay.createOrder({
-    amountMinor: BigInt(amount),
+    amountMinor: amount,
     currency,
     receipt,
   });
@@ -224,10 +233,10 @@ async function capturePayment(
   _attempts: number,
 ): Promise<DrainResult> {
   const paymentId = stringField(payload, "payment_id");
-  const amount = numberField(payload, "amount_minor");
+  const amount = minorField(payload, "amount_minor");
   const currency = stringField(payload, "currency");
 
-  const captured = await razorpay.capture(paymentId, BigInt(amount), currency);
+  const captured = await razorpay.capture(paymentId, amount, currency);
   await applyRemoteState(sql, captured.orderId, captured.id, "captured", captured.feeMinor);
   await complete(sql, id, { payment_id: captured.id, status: captured.status });
   return { id, kind: "capture_payment", outcome: "done", detail: captured.id };
@@ -246,6 +255,7 @@ async function resolveInDoubt(
   if (found !== undefined) {
     await rememberOrder(sql, found);
     await complete(sql, id, { order_id: found.id, resolved: true });
+    await completeSiblingCreate(sql, receipt, found.id);
     return { id, kind: "resolve_in_doubt", outcome: "done", detail: found.id };
   }
 
@@ -263,11 +273,26 @@ async function resolveInDoubt(
 async function rememberOrder(sql: Sql, order: RazorpayOrder): Promise<void> {
   await sql`
 		UPDATE payments
-		   SET order_id = ${order.id},
+		   SET order_id = COALESCE(order_id, ${order.id}),
 		       in_doubt = FALSE,
 		       in_doubt_reason = NULL,
 		       updated_at = now()
 		 WHERE receipt = ${order.receipt}
+	`;
+}
+
+/** The original create_order is failed on timeout. Once lookup succeeds, retire it. */
+async function completeSiblingCreate(sql: Sql, receipt: string, orderId: string): Promise<void> {
+  await sql`
+		UPDATE outbox
+		   SET state = 'done',
+		       result = ${sql.json({ order_id: orderId, recovered: true } as never)},
+		       last_error = NULL,
+		       lease_expires_at = NULL,
+		       updated_at = now()
+		 WHERE stream = ${receipt}
+		   AND kind = 'create_order'
+		   AND state IN ('failed', 'in_doubt')
 	`;
 }
 
@@ -303,13 +328,13 @@ async function flagPayment(sql: Sql, receipt: string, reason: string): Promise<v
  * capture event — webhook and outbox both firing — posts once.
  */
 export async function applyRemoteState(
-  sql: Sql,
+  sql: Sql | TransactionSql,
   orderId: string,
   paymentId: string,
   incoming: PaymentState,
   feeMinor = 0n,
 ): Promise<{ applied: boolean; next: PaymentState }> {
-  return sql.begin(async (tx) => {
+  return withTxn(sql, async (tx) => {
     const rows = await tx<
       {
         receipt: string;
@@ -338,6 +363,12 @@ export async function applyRemoteState(
 			 WHERE receipt = ${row.receipt}
 		`;
 
+    // A refund that never captured is contradictory. Rank would otherwise
+    // let refunded (50) skip captured (40) from created/authorized.
+    if (isContradictory(row.state, incoming)) {
+      return { applied: false, next: row.state };
+    }
+
     const transition = advance(row.state, incoming);
     if (!transition.applied) return { applied: false, next: transition.next };
 
@@ -346,9 +377,10 @@ export async function applyRemoteState(
 			 WHERE receipt = ${row.receipt}
 		`;
 
+    const amount = money(row.amount_minor, row.currency);
+    const fee = money(feeMinor, row.currency);
+
     if (transition.next === "captured") {
-      const amount = money(row.amount_minor, row.currency);
-      const fee = money(feeMinor, row.currency);
       try {
         await post(tx, {
           id: `${row.authorization_id}:capture`,
@@ -360,6 +392,50 @@ export async function applyRemoteState(
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
       }
+    }
+
+    if (transition.next === "failed") {
+      try {
+        await post(tx, {
+          id: `${row.authorization_id}:release`,
+          kind: "release",
+          memo: `release ${paymentId}`,
+          externalRef: paymentId,
+          postings: releasePostings(amount),
+        });
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+      }
+    }
+
+    if (transition.next === "refunded") {
+      try {
+        await post(tx, {
+          id: `${row.authorization_id}:refund`,
+          kind: "refund",
+          memo: `refund ${paymentId}`,
+          externalRef: paymentId,
+          postings: refundPostings(amount, fee),
+        });
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+      }
+    }
+
+    // One-in-flight is a partial unique index on state='authorized'.
+    // Leaving the row there after Razorpay captures or fails is how a
+    // mandate that still has budget cannot buy a second time.
+    if (
+      transition.next === "captured" ||
+      transition.next === "failed" ||
+      transition.next === "refunded"
+    ) {
+      await tx`
+				UPDATE authorizations
+				   SET state = ${transition.next}, updated_at = now()
+				 WHERE id = ${row.authorization_id}
+				   AND state = 'authorized'
+			`;
     }
 
     return { applied: true, next: transition.next };
@@ -385,10 +461,11 @@ function stringField(payload: JsonValue, key: string): string {
   return value;
 }
 
-function numberField(payload: JsonValue, key: string): number {
+function minorField(payload: JsonValue, key: string): bigint {
   const value = asObject(payload)[key];
-  if (typeof value !== "number" || !Number.isInteger(value)) {
-    throw new Error(`outbox payload is missing integer ${key}`);
-  }
-  return value;
+  if (typeof value === "string" && /^-?\d+$/.test(value)) return BigInt(value);
+  // Older outbox rows and a few tests still write a JSON number. Accept
+  // those if they are safe integers; new writes use a string.
+  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  throw new Error(`outbox payload is missing integer ${key}`);
 }

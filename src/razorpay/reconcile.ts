@@ -201,8 +201,8 @@ export async function adoptRemoteState(
     if (exception.orderId === undefined || exception.remoteState === undefined) continue;
     if (!isPaymentState(exception.remoteState)) continue;
 
-    const paymentId =
-      exception.paymentId ?? (await firstPaymentId(razorpay, exception.orderId)) ?? "unknown";
+    const paymentId = exception.paymentId ?? (await firstPaymentId(razorpay, exception.orderId));
+    if (paymentId === undefined) continue;
 
     const result = await applyRemoteState(sql, exception.orderId, paymentId, exception.remoteState);
     if (result.applied) adopted += 1;

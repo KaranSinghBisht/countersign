@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { digestJson } from "../../src/crypto/digest.js";
 import type { Sql } from "../../src/db/client.js";
 import { balanceOf, ensureAccounts } from "../../src/ledger/ledger.js";
+import { ConstraintSchema } from "../../src/mandate/constraints.js";
 import { money } from "../../src/money/money.js";
 import { RazorpayTimeout } from "../../src/razorpay/client.js";
 import { fakeRazorpay, seedPayment } from "../../src/razorpay/fake.js";
@@ -9,6 +10,7 @@ import { ofStream } from "../../src/razorpay/outbox.js";
 import { deriveReceipt } from "../../src/razorpay/receipt.js";
 import { adoptRemoteState, reconcile } from "../../src/razorpay/reconcile.js";
 import { drain, drainOne, intendPayment } from "../../src/razorpay/settle.js";
+import { attemptSpend } from "../../src/spend/accounting.js";
 import { migrateOnce, testDb, testId, truncateAll } from "./helpers.js";
 
 let sql: Sql;
@@ -132,6 +134,29 @@ describe("the outbox worker", () => {
     const payment = await paymentOf(receipt);
     expect(payment?.in_doubt).toBe(false);
     expect(payment?.order_id).toMatch(/^order_fake_/);
+  });
+
+  it("does not replay create_order after a timeout", async () => {
+    const razorpay = fakeRazorpay();
+    razorpay.timeoutNextCreate(false);
+    const { receipt } = await intend();
+
+    expect((await drainOne(sql, razorpay))?.outcome).toBe("in_doubt");
+
+    const afterTimeout = await ofStream(sql, receipt);
+    expect(afterTimeout.find((m) => m.kind === "create_order")?.state).toBe("failed");
+    expect(afterTimeout.some((m) => m.kind === "resolve_in_doubt")).toBe(true);
+
+    await sql`
+      UPDATE outbox
+         SET next_attempt_at = now() - interval '1 second',
+             state = 'in_doubt'
+       WHERE kind = 'create_order' AND stream = ${receipt}
+    `;
+
+    const again = await drain(sql, razorpay, 5);
+    expect(again.some((r) => r.kind === "create_order")).toBe(false);
+    expect(razorpay.orders.size).toBe(0);
   });
 
   it("recovers a duplicate receipt as success", async () => {
@@ -281,6 +306,57 @@ describe("reconciliation", () => {
     expect(posted).toHaveLength(1);
 
     expect((await reconcile(sql, razorpay, window())).exceptions).toEqual([]);
+  });
+
+  it("clears one-in-flight when a capture is adopted", async () => {
+    const openJti = testId();
+    const constraints = [
+      { type: "spend.amount_range", currency: "INR", min: 0, max: 50_000 },
+      { type: "spend.budget", currency: "INR", max: 50_000 },
+      { type: "spend.allowed_payees", allowed: [{ id: "vnd_1042" }] },
+      { type: "spend.rail", allowed: ["razorpay_order"] },
+    ].map((c) => ConstraintSchema.parse(c));
+
+    const first = await attemptSpend(sql, {
+      openJti,
+      closedJti: testId(),
+      constraints,
+      request: { amount: money(AMOUNT, INR), payee: { id: "vnd_1042" }, rail: "razorpay_order" },
+      now: now(),
+      authorizationId: testId(),
+    });
+    if (first.outcome !== "permitted") throw new Error("expected first spend to be permitted");
+
+    const razorpay = fakeRazorpay();
+    const { receipt } = await sql.begin((tx) =>
+      intendPayment(tx, {
+        authorizationId: first.authorizationId,
+        openJti,
+        closedJti: testId(),
+        requestHash: HASH,
+        amountMinor: AMOUNT,
+        currency: INR,
+        outboxId: testId(),
+      }),
+    );
+    await drainOne(sql, razorpay);
+    const order = [...razorpay.orders.values()][0];
+    if (order === undefined) throw new Error("expected an order");
+    seedPayment(razorpay, order.id, { status: "captured" });
+
+    const report = await reconcile(sql, razorpay, window());
+    expect(await adoptRemoteState(sql, razorpay, report)).toBe(1);
+    expect((await paymentOf(receipt))?.state).toBe("captured");
+
+    const second = await attemptSpend(sql, {
+      openJti,
+      closedJti: testId(),
+      constraints,
+      request: { amount: money(AMOUNT, INR), payee: { id: "vnd_1042" }, rail: "razorpay_order" },
+      now: now(),
+      authorizationId: testId(),
+    });
+    expect(second.outcome).toBe("permitted");
   });
 });
 

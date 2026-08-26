@@ -108,6 +108,21 @@ const PaymentSchema = z.object({
 const CollectionSchema = <T extends z.ZodType>(item: T) =>
   z.object({ items: z.array(item).default([]), count: z.number().optional() });
 
+const PAGE = 100;
+const MAX_LISTED = 10_000;
+
+async function listPages<T>(page: (skip: number) => Promise<T[]>): Promise<T[]> {
+  const all: T[] = [];
+  let skip = 0;
+  for (;;) {
+    const items = await page(skip);
+    all.push(...items);
+    if (items.length < PAGE) return all;
+    skip += items.length;
+    if (skip >= MAX_LISTED) return all;
+  }
+}
+
 export interface LiveOptions {
   readonly keyId: string;
   readonly keySecret: string;
@@ -124,7 +139,12 @@ export function liveRazorpay(options: LiveOptions): Razorpay {
   const fetchImpl = options.fetch ?? fetch;
   const auth = `Basic ${Buffer.from(`${options.keyId}:${options.keySecret}`).toString("base64")}`;
 
-  const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+  const request = async (
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<unknown> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -136,6 +156,7 @@ export function liveRazorpay(options: LiveOptions): Razorpay {
           Authorization: auth,
           Accept: "application/json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(extraHeaders ?? {}),
         },
         signal: controller.signal,
       };
@@ -168,13 +189,18 @@ export function liveRazorpay(options: LiveOptions): Razorpay {
         throw new RangeError(`order amount ${input.amountMinor} exceeds what JSON can carry`);
       }
 
-      const raw = await request("POST", "/orders", {
-        amount: Number(input.amountMinor),
-        currency: input.currency,
-        receipt: input.receipt,
-        payment_capture: 0,
-        notes: input.notes ?? {},
-      });
+      const raw = await request(
+        "POST",
+        "/orders",
+        {
+          amount: Number(input.amountMinor),
+          currency: input.currency,
+          receipt: input.receipt,
+          payment_capture: 0,
+          notes: input.notes ?? {},
+        },
+        { "Idempotency-Key": input.receipt },
+      );
       return asOrder(raw);
     },
 
@@ -194,13 +220,19 @@ export function liveRazorpay(options: LiveOptions): Razorpay {
     },
 
     async listOrders(window) {
-      const raw = await request("GET", `/orders?from=${window.from}&to=${window.to}&count=100`);
-      return CollectionSchema(OrderSchema).parse(raw).items.map(asOrder);
+      return listPages((skip) =>
+        request("GET", `/orders?from=${window.from}&to=${window.to}&count=100&skip=${skip}`).then(
+          (raw) => CollectionSchema(OrderSchema).parse(raw).items.map(asOrder),
+        ),
+      );
     },
 
     async listPayments(window) {
-      const raw = await request("GET", `/payments?from=${window.from}&to=${window.to}&count=100`);
-      return CollectionSchema(PaymentSchema).parse(raw).items.map(asPayment);
+      return listPages((skip) =>
+        request("GET", `/payments?from=${window.from}&to=${window.to}&count=100&skip=${skip}`).then(
+          (raw) => CollectionSchema(PaymentSchema).parse(raw).items.map(asPayment),
+        ),
+      );
     },
 
     async capture(paymentId, amountMinor, currency) {
