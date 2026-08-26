@@ -99,9 +99,13 @@ vectors:
 keys:
 	@pnpm exec tsx scripts/gen-keys.ts
 
-## demo: eight rehearsed failures, live, under 20 seconds (needs `make up` for 6 and 8)
+## demo: eight rehearsed failures; writes .countersign/export + trust.json (needs `make up` for 6 and 8)
 demo:
 	@pnpm exec tsx scripts/rehearse.ts
+
+## export: write the LIVE audit log as a verifiable bundle (needs `make up` and a published checkpoint)
+export:
+	@pnpm exec tsx scripts/export-bundle.ts
 
 ## cli: single-file verifier, for handing to a judge on a USB stick
 cli:
@@ -112,7 +116,7 @@ cli:
 	@./dist/countersign.mjs --help >/dev/null
 	@echo "wrote dist/countersign.mjs"
 
-.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli demo
+.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli demo export
 
 # Guard against exactly that recurring: fail if any .PHONY target has no
 # recipe. `make -pq` prints the database; a real target reports its commands.
