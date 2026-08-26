@@ -428,7 +428,7 @@ export async function duplicateReceipt(sql: Sql): Promise<ScenarioResult> {
     INSERT INTO outbox (id, kind, stream, payload)
     VALUES (
       ${ulid()}, 'create_order', ${intended.receipt},
-      ${sql.json({ receipt: intended.receipt, amount_minor: Number(AMOUNT), currency: "INR" })}
+      ${sql.json({ receipt: intended.receipt, amount_minor: AMOUNT.toString(), currency: "INR" })}
     )
   `;
   const replay = await drainOne(sql, razorpay);

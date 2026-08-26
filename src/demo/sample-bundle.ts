@@ -25,6 +25,7 @@ import {
 import { hashJws } from "../mandate/verify.js";
 import { deriveReceipt } from "../razorpay/receipt.js";
 import type { CheckoutFile, ReceiptFile } from "../verify/bundle.js";
+import { writeBundle } from "../verify/export.js";
 
 export const ORIGIN = "countersign.dev/audit";
 export const AUDIENCE = "https://countersign.example/agent-commerce";
@@ -217,6 +218,7 @@ export async function signedWorld(keys: SampleKeys): Promise<SampleWorld> {
     root: hex(treeRoot),
     proof: inclusionProof(0, entries).map(hex),
     checkpoint_note: note,
+    record,
   };
 
   const checkout: CheckoutFile = {
@@ -270,4 +272,24 @@ export function writeTrustFile(dir: string, keys: SampleKeys): string {
     )}\n`,
   );
   return path;
+}
+
+export function writeHonestBundle(dir: string, world: SampleWorld): void {
+  writeBundle(dir, {
+    records: [world.record],
+    checkpoints: { 1: world.note },
+    mandates: { [world.openJti]: world.openJws, [world.closedJti]: world.closedJws },
+    checkouts: { [world.closedJti]: world.checkout },
+    receipts: { [world.receipt]: world.receiptFile },
+    policy: { engine_version: "0.3.1", bundle_sha256: DIGEST },
+  });
+}
+
+/** Honest bundle + matching out-of-band trust. What `make demo` leaves for the USB CLI. */
+export async function writeDemoExport(root: string): Promise<{ bundle: string; trust: string }> {
+  const keys = await generateSampleKeys();
+  const world = await signedWorld(keys);
+  const bundle = join(root, "export");
+  writeHonestBundle(bundle, world);
+  return { bundle, trust: writeTrustFile(root, keys) };
 }
