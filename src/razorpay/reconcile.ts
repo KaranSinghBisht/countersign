@@ -36,6 +36,8 @@ export interface Exception {
   readonly remoteState?: string;
   readonly localAmount?: string;
   readonly remoteAmount?: string;
+  /** The PSP fee Razorpay reports on the leading payment, so an adopted capture books it. */
+  readonly remoteFeeMinor?: bigint;
   readonly detail: string;
 }
 
@@ -149,7 +151,9 @@ export async function reconcile(
         kind: "STATE_MISMATCH",
         receipt: row.receipt,
         orderId: remote.id,
-        ...(leading === undefined ? {} : { paymentId: leading.id }),
+        ...(leading === undefined
+          ? {}
+          : { paymentId: leading.id, remoteFeeMinor: leading.feeMinor }),
         localState: row.state,
         remoteState,
         detail: `local is ${row.state}, Razorpay is ${remoteState}`,
@@ -205,7 +209,16 @@ export async function adoptRemoteState(
     const paymentId = exception.paymentId ?? (await firstPaymentId(razorpay, exception.orderId));
     if (paymentId === undefined) continue;
 
-    const result = await applyRemoteState(sql, exception.orderId, paymentId, exception.remoteState);
+    // Book the capture with the fee Razorpay reported. The capture ledger post
+    // is idempotent by id, so a fee-0 adopt here would swallow the later
+    // fee-bearing webhook as a duplicate and lose the PSP expense.
+    const result = await applyRemoteState(
+      sql,
+      exception.orderId,
+      paymentId,
+      exception.remoteState,
+      exception.remoteFeeMinor ?? 0n,
+    );
     if (result.applied) adopted += 1;
 
     // An adopted authorization is a payment whose webhook never reached us —

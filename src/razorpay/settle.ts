@@ -13,6 +13,7 @@ import { capturePostings, post, refundPostings, releasePostings } from "../ledge
 import { type CurrencyCode, money } from "../money/money.js";
 import {
   type Razorpay,
+  RazorpayAlreadyCaptured,
   RazorpayApiError,
   RazorpayDuplicateReceipt,
   type RazorpayOrder,
@@ -87,6 +88,22 @@ export async function intendPayment(
   return { receipt };
 }
 
+/**
+ * Record Checkout's signed callback against an order.
+ *
+ * Verify BEFORE touching the row, and never write a failing verification.
+ * `/pay/:order_id/complete` is unauthenticated and order ids travel in the
+ * pay links, so an earlier verify-after-write let anyone who knew an order id
+ * overwrite a settled order's attested `payment_id`/`signature`, flip
+ * `signature_verified` to false, or collide the `payment_id` UNIQUE index
+ * into an uncaught 500. A valid signature commits `order_id|payment_id` to
+ * the key secret, so the write only ever lands verified.
+ *
+ * The write is first-wins (`COALESCE`) and only from a pre-capture state, so
+ * a second callback — or a webhook that already filled the columns — cannot
+ * clobber what settled; a unique collision (only reachable without a valid
+ * signature, hence never past the check) is caught, not surfaced as a 500.
+ */
 export async function attachSignature(
   sql: Sql,
   orderId: string,
@@ -94,18 +111,24 @@ export async function attachSignature(
   signature: string,
   keySecret: string,
 ): Promise<boolean> {
-  const ok = verifyPaymentSignature(orderId, paymentId, signature, keySecret);
+  if (!verifyPaymentSignature(orderId, paymentId, signature, keySecret)) return false;
 
-  await sql`
-		UPDATE payments
-		   SET payment_id = ${paymentId},
-		       signature = ${signature},
-		       signature_verified = ${ok},
-		       updated_at = now()
-		 WHERE order_id = ${orderId}
-	`;
+  try {
+    await sql`
+			UPDATE payments
+			   SET payment_id = COALESCE(payment_id, ${paymentId}),
+			       signature = COALESCE(signature, ${signature}),
+			       signature_verified = TRUE,
+			       updated_at = now()
+			 WHERE order_id = ${orderId}
+			   AND state IN ('created', 'authorized')
+		`;
+  } catch (error) {
+    if (isUniqueViolation(error)) return false;
+    throw error;
+  }
 
-  return ok;
+  return true;
 }
 
 export interface DrainResult {
@@ -151,6 +174,22 @@ export async function drainOne(sql: Sql, razorpay: Razorpay): Promise<DrainResul
         await markInDoubt(sql, claimed.id, error.message);
       }
       return { id: claimed.id, kind: claimed.kind, outcome: "in_doubt", detail: error.message };
+    }
+
+    if (error instanceof RazorpayAlreadyCaptured) {
+      // The capture already succeeded on an earlier, lost attempt. Fetch the
+      // real captured payment so the fee is booked correctly, apply it (the
+      // ledger post is idempotent, so a double never double-books), and
+      // retire the message as done rather than failing a payment that moved.
+      const captured = await razorpay.fetchPayment(error.paymentId);
+      await applyRemoteState(sql, captured.orderId, captured.id, "captured", captured.feeMinor);
+      await complete(sql, claimed.id, { payment_id: captured.id, recovered: true });
+      return {
+        id: claimed.id,
+        kind: claimed.kind,
+        outcome: "done",
+        detail: `already captured ${captured.id}`,
+      };
     }
 
     if (error instanceof RazorpayDuplicateReceipt) {

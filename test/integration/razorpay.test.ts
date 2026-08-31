@@ -214,6 +214,46 @@ describe("the outbox worker", () => {
     expect(await drainOne(sql, razorpay)).toBeUndefined();
   });
 
+  it("recovers a reclaimed capture that already succeeded, without double-booking", async () => {
+    // A worker that dies after capture() succeeds but before it records the
+    // result leaves the message claimable; the reclaim re-captures and the
+    // real API answers 400 "already captured". That is success, not failure.
+    const razorpay = fakeRazorpay();
+    const { receipt } = await intend();
+    await drainOne(sql, razorpay);
+
+    const order = [...razorpay.orders.values()][0];
+    if (order === undefined) throw new Error("expected an order");
+    const payment = seedPayment(razorpay, order.id, { status: "authorized", feeMinor: 40n });
+
+    await sql`
+      INSERT INTO outbox (id, kind, stream, payload)
+      VALUES (${`capture:${payment.id}`}, 'capture_payment', ${receipt},
+        ${sql.json({ receipt, payment_id: payment.id, amount_minor: Number(AMOUNT), currency: "INR" })})
+    `;
+    expect(await drainOne(sql, razorpay)).toMatchObject({
+      outcome: "done",
+      kind: "capture_payment",
+    });
+    expect((await paymentOf(receipt))?.state).toBe("captured");
+
+    // The reclaim: same payment id, re-runs, the fake now reports it captured.
+    await sql`
+      INSERT INTO outbox (id, kind, stream, payload)
+      VALUES (${`capture-reclaim:${payment.id}`}, 'capture_payment', ${receipt},
+        ${sql.json({ receipt, payment_id: payment.id, amount_minor: Number(AMOUNT), currency: "INR" })})
+    `;
+    const recovered = await drainOne(sql, razorpay);
+    expect(recovered).toMatchObject({ outcome: "done", kind: "capture_payment" });
+    expect(recovered?.detail).toContain("already captured");
+
+    // The capture ledger post is idempotent: exactly one, with the real fee.
+    const posts = await sql`
+      SELECT 1 FROM ledger_transactions WHERE kind = 'capture' AND external_ref = ${payment.id}
+    `;
+    expect(posts).toHaveLength(1);
+  });
+
   it("frees the mandate's one-in-flight slot when Razorpay refuses the order", async () => {
     // Wrong API keys are enough to make every create a 401. Before this,
     // the authorization stayed `authorized` for ever and the partial unique

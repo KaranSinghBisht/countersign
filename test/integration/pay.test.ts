@@ -179,4 +179,57 @@ describe("POST /pay/:order_id/complete", () => {
     expect(crossed.statusCode).toBe(400);
     expect(crossed.json()).toMatchObject({ outcome: "rejected", at: "schema" });
   });
+
+  it("a bogus callback cannot touch a settled order's attested columns or 500", async () => {
+    // order ids ride in the pay links, so /complete is a public write target.
+    // An unauthenticated caller must not clobber the payment Razorpay attested
+    // to, nor collide the payment_id UNIQUE index into an internal error.
+    const receipt = await seedPayment(ORDER_ID);
+    await sql`
+      UPDATE payments
+         SET state = 'captured', payment_id = ${PAYMENT_ID},
+             signature = 'real_sig', signature_verified = TRUE
+       WHERE receipt = ${receipt}
+    `;
+
+    // Forged signature over an attacker payment id: rejected, nothing written.
+    const forged = await app.inject({
+      method: "POST",
+      url: `/pay/${ORDER_ID}/complete`,
+      headers: { "content-type": "application/json" },
+      payload: {
+        razorpay_payment_id: "pay_attacker0001",
+        razorpay_order_id: ORDER_ID,
+        razorpay_signature: "0".repeat(64),
+      },
+    });
+    expect(forged.statusCode).toBe(400);
+
+    // A valid callback whose payment id already belongs to the settled order
+    // would collide the UNIQUE index; it must be caught, not surface a 500.
+    await sql`
+      INSERT INTO payments (receipt, authorization_id, open_jti, closed_jti, order_id, amount_minor, currency, state)
+      VALUES (${deriveReceipt(testId(), "R9dS1SLLLZQzHVeYm8dQ8Zc9Zc1kxZq2wPQKmxDxzZ8")},
+              ${testId()}, ${testId()}, ${testId()}, 'order_Second1', 1499000, 'INR', 'created')
+    `;
+    const collide = await app.inject({
+      method: "POST",
+      url: "/pay/order_Second1/complete",
+      headers: { "content-type": "application/json" },
+      payload: callback("order_Second1", PAYMENT_ID),
+    });
+    expect(collide.statusCode).not.toBe(500);
+
+    // The originally settled row is untouched.
+    const [settled] = await sql<
+      { payment_id: string; signature: string; signature_verified: boolean }[]
+    >`
+      SELECT payment_id, signature, signature_verified FROM payments WHERE receipt = ${receipt}
+    `;
+    expect(settled).toEqual({
+      payment_id: PAYMENT_ID,
+      signature: "real_sig",
+      signature_verified: true,
+    });
+  });
 });

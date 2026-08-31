@@ -27,6 +27,19 @@ export class RazorpayDuplicateReceipt extends Error {
   }
 }
 
+/**
+ * Razorpay refused a capture because the payment is already captured. Not a
+ * failure: the money moved. A worker that died after `capture()` succeeded but
+ * before it recorded the result reclaims the message and re-captures; this is
+ * how the second attempt learns it already happened.
+ */
+export class RazorpayAlreadyCaptured extends Error {
+  override readonly name = "RazorpayAlreadyCaptured";
+  constructor(readonly paymentId: string) {
+    super(`payment ${paymentId} is already captured`);
+  }
+}
+
 export class RazorpayApiError extends Error {
   override readonly name = "RazorpayApiError";
   constructor(
@@ -242,12 +255,23 @@ export function liveRazorpay(options: LiveOptions): Razorpay {
         throw new RangeError(`capture amount ${amountMinor} exceeds what JSON can carry`);
       }
 
-      return asPayment(
-        await request("POST", `/payments/${encodeURIComponent(paymentId)}/capture`, {
-          amount: Number(amountMinor),
-          currency,
-        }),
-      );
+      try {
+        return asPayment(
+          await request("POST", `/payments/${encodeURIComponent(paymentId)}/capture`, {
+            amount: Number(amountMinor),
+            currency,
+          }),
+        );
+      } catch (error) {
+        if (
+          error instanceof RazorpayApiError &&
+          error.status === 400 &&
+          /already.*captured/i.test(error.message)
+        ) {
+          throw new RazorpayAlreadyCaptured(paymentId);
+        }
+        throw error;
+      }
     },
   };
 }

@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import {
   type CreateOrderInput,
   type Razorpay,
+  RazorpayAlreadyCaptured,
   RazorpayApiError,
   RazorpayDuplicateReceipt,
   type RazorpayOrder,
@@ -134,6 +135,10 @@ export function fakeRazorpay(): FakeRazorpay {
       const existing = payments.get(paymentId);
       if (existing === undefined) {
         throw new RazorpayApiError(404, "POST /payments/:id/capture", "payment not found");
+      }
+      // A reclaimed capture message re-captures; the real API answers 400.
+      if (existing.status === "captured") {
+        throw new RazorpayAlreadyCaptured(paymentId);
       }
 
       const captured: RazorpayPayment = {
