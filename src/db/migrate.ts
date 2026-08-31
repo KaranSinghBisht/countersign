@@ -10,7 +10,7 @@
  * run refuses rather than pretending the schemas match.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { digestString } from "../crypto/digest.js";
@@ -33,7 +33,18 @@ export interface Migration {
 }
 
 export function migrationsDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
+  const here = dirname(fileURLToPath(import.meta.url));
+  // src/db → ../../migrations ; dist/src/db → one level deeper, because tsc
+  // compiles under dist/src but never copies .sql files. Without the second
+  // candidate the compiled server cannot boot at all.
+  const candidates = [
+    join(here, "..", "..", "migrations"),
+    join(here, "..", "..", "..", "migrations"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(dir)) return dir;
+  }
+  throw new Error(`migrations directory not found; looked in: ${candidates.join(", ")}`);
 }
 
 export function loadMigrations(dir = migrationsDir()): Migration[] {
@@ -72,13 +83,16 @@ export async function migrate(sql: Sql, dir = migrationsDir()): Promise<MigrateR
 		)
 	`;
 
-  // A session-level advisory lock, so two processes starting at once (a
-  // deploy and a test run, say) serialise instead of both trying to create
-  // the same table.
-  await sql`SELECT pg_advisory_lock(${MIGRATION_LOCK_ID})`;
+  // One transaction, one connection, one transaction-scoped advisory lock.
+  // Two processes starting at once (a deploy and a test run, say) serialise
+  // instead of both trying to create the same table. The lock MUST be
+  // transaction-scoped: a session lock taken through a pooled handle can be
+  // acquired on one backend and "released" on another, which leaves it held
+  // by a connection nobody owns until the pool recycles it.
+  return sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_ID})`;
 
-  try {
-    const rows = await sql<{ version: number; name: string; sha256: string }[]>`
+    const rows = await tx<{ version: number; name: string; sha256: string }[]>`
 			SELECT version, name, sha256 FROM schema_migrations
 		`;
     const applied = new Map(rows.map((r) => [r.version, r]));
@@ -98,14 +112,16 @@ export async function migrate(sql: Sql, dir = migrationsDir()): Promise<MigrateR
         continue;
       }
 
-      // `sql.file`-style execution is avoided: `sql.unsafe` runs the file
+      // `sql.file`-style execution is avoided: `unsafe` runs the file
       // verbatim, which is required because migrations contain multiple
       // statements and dollar-quoted function bodies that a parameterised
       // query would mangle. The input is a file on disk under version
-      // control, not user input.
-      await sql.begin(async (tx) => {
-        await tx.unsafe(migration.sql);
-        await tx`
+      // control, not user input. A savepoint per migration keeps the error
+      // pointing at the file that failed; the outer transaction still makes
+      // the whole run all-or-nothing.
+      await tx.savepoint(async (sp) => {
+        await sp.unsafe(migration.sql);
+        await sp`
 					INSERT INTO schema_migrations (version, name, sha256)
 					VALUES (${migration.version}, ${migration.name}, ${migration.sha256})
 				`;
@@ -115,7 +131,5 @@ export async function migrate(sql: Sql, dir = migrationsDir()): Promise<MigrateR
     }
 
     return { applied: newlyApplied, alreadyCurrent: migrations.length - newlyApplied.length };
-  } finally {
-    await sql`SELECT pg_advisory_unlock(${MIGRATION_LOCK_ID})`;
-  }
+  });
 }

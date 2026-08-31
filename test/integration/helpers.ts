@@ -1,10 +1,12 @@
 import { connect, type Sql } from "../../src/db/client.js";
 import { migrate } from "../../src/db/migrate.js";
+import { assertSafeToTruncate } from "../../src/db/safety.js";
 
 const URL =
   process.env.DATABASE_URL ?? "postgres://countersign:countersign@localhost:5432/countersign";
 
 export function testDb(): Sql {
+  assertSafeToTruncate(URL, "the integration suite");
   return connect({ url: URL, max: 20 });
 }
 

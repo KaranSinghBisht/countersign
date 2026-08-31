@@ -2,11 +2,15 @@
  * Reset the tables the rehearsal writes.
  *
  * Same trick as the integration helpers: `ledger_entries` refuses TRUNCATE,
- * so the reset runs with triggers suspended for one transaction only.
+ * so the reset runs with triggers suspended for one transaction only. The
+ * entry point (scripts/rehearse.ts) runs `assertSafeToTruncate` on the URL
+ * before it ever connects; this function assumes that already happened.
  */
 
 import type { Sql } from "../db/client.js";
 
+// Keep in step with test/integration/helpers.ts. A table left out here
+// survives the reset and its stale rows meet a log that restarted at seq 0.
 const TABLES = [
   "ledger_entries",
   "ledger_transactions",
@@ -22,6 +26,7 @@ const TABLES = [
   "webhook_events",
   "payments",
   "outbox",
+  "mandate_artifacts",
 ];
 
 export async function resetDemoData(sql: Sql): Promise<void> {
