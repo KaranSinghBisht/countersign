@@ -28,6 +28,9 @@ scp_cmd "$PG_PASSWORD_FILE" "$SSH_HOST:/opt/countersign/postgres_password"
 ssh_cmd 'chmod 600 /opt/countersign/app.env /opt/countersign/postgres_password'
 
 echo "→ starting the stack"
-ssh_cmd "cd /opt/countersign && PUBLIC_HOST='$PUBLIC_HOST' docker compose up -d --remove-orphans"
+# Compose reads PUBLIC_HOST from /opt/countersign/.env, so every later
+# `docker compose ps|logs` on the box works without remembering to set it.
+ssh_cmd "printf 'PUBLIC_HOST=%s\n' '$PUBLIC_HOST' > /opt/countersign/.env"
+ssh_cmd 'cd /opt/countersign && docker compose up -d --remove-orphans'
 ssh_cmd 'cd /opt/countersign && docker compose ps'
 echo "→ https://$PUBLIC_HOST/healthz"
