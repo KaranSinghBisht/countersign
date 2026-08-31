@@ -52,6 +52,9 @@ export const SAFE_KEYS: ReadonlySet<string> = new Set([
   "kind",
   "outcome",
   "detail",
+  "exceptions",
+  "adopted",
+  "kinds",
 
   // Domain identifiers we mint or that identify a thing, not a person
   "order_id",

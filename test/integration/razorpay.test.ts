@@ -352,6 +352,37 @@ describe("reconciliation", () => {
     expect((await reconcile(sql, razorpay, window())).exceptions).toEqual([]);
   });
 
+  it("adopts an authorized payment whose webhook never arrived and queues its capture", async () => {
+    // The live incident this guards: Checkout's callback died with a closed
+    // tab and the webhook was registered a moment too late, so a real,
+    // authorized payment sat at Razorpay heading for its five-day
+    // auto-refund. The sweep must adopt it AND set capture in motion.
+    const razorpay = fakeRazorpay();
+    const { receipt } = await intend();
+    await drainOne(sql, razorpay);
+
+    const order = [...razorpay.orders.values()][0];
+    if (order === undefined) throw new Error("expected an order");
+    const payment = seedPayment(razorpay, order.id, { status: "authorized" });
+
+    const report = await reconcile(sql, razorpay, window());
+    expect(report.exceptions.map((e) => e.kind)).toEqual(["STATE_MISMATCH"]);
+    expect(await adoptRemoteState(sql, razorpay, report)).toBe(1);
+
+    expect((await paymentOf(receipt))?.state).toBe("authorized");
+    const queued = await sql<{ id: string; state: string }[]>`
+      SELECT id, state FROM outbox WHERE kind = 'capture_payment'
+    `;
+    expect(queued).toEqual([{ id: `capture:${payment.id}`, state: "pending" }]);
+
+    // The worker's next tick performs it, and the fake confirms money moved.
+    expect(await drainOne(sql, razorpay)).toMatchObject({
+      outcome: "done",
+      kind: "capture_payment",
+    });
+    expect((await paymentOf(receipt))?.state).toBe("captured");
+  });
+
   it("clears one-in-flight when a capture is adopted", async () => {
     const openJti = testId();
     const constraints = [

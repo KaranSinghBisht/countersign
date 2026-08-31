@@ -12,6 +12,7 @@
 
 import type { Sql } from "../db/client.js";
 import type { CurrencyCode } from "../money/money.js";
+import { captureAuthorized } from "./capture.js";
 import type { Razorpay, RazorpayOrder, RazorpayPayment, TimeWindow } from "./client.js";
 import { applyRemoteState } from "./settle.js";
 import { isPaymentState, type PaymentState } from "./state.js";
@@ -206,6 +207,14 @@ export async function adoptRemoteState(
 
     const result = await applyRemoteState(sql, exception.orderId, paymentId, exception.remoteState);
     if (result.applied) adopted += 1;
+
+    // An adopted authorization is a payment whose webhook never reached us —
+    // Checkout's callback lost to a closed tab, a webhook registered a moment
+    // too late. Left alone, Razorpay auto-refunds it after five days. Queue
+    // the same capture the webhook would have; idempotent by payment id.
+    if (result.applied && result.next === "authorized") {
+      await captureAuthorized(sql, exception.orderId, paymentId);
+    }
   }
 
   return adopted;

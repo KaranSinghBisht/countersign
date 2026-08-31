@@ -9,6 +9,7 @@ import type { KeyPair } from "../crypto/keys.js";
 import type { Sql } from "../db/client.js";
 import type { Razorpay } from "../razorpay/client.js";
 import { purgeDone } from "../razorpay/outbox.js";
+import { adoptRemoteState, reconcile } from "../razorpay/reconcile.js";
 import { drain } from "../razorpay/settle.js";
 import { processPending, purgeProcessedEvents } from "../razorpay/webhook.js";
 import { purgeExpired } from "../spend/nonce.js";
@@ -17,6 +18,9 @@ import { purgeSettled, reapExpiredLeases } from "./idempotency.js";
 
 /** Housekeeping runs once per this many ticks — roughly once a minute. */
 const HOUSEKEEPING_EVERY = 30;
+
+/** Reconciliation runs once per this many housekeepings — roughly every ten minutes. */
+const RECONCILE_EVERY = 10;
 
 export interface WorkerOptions {
   readonly intervalMs?: number;
@@ -42,6 +46,7 @@ export function startWorkers(
   let stopped = false;
   let running = false;
   let ticks = 0;
+  let housekeepings = 0;
   let current: Promise<void> = Promise.resolve();
 
   const tick = async (): Promise<void> => {
@@ -72,6 +77,26 @@ export function startWorkers(
       // expired nonces and settled idempotency keys accumulate one row per
       // request forever — a storage DoS that costs the caller nothing.
       if (ticks % HOUSEKEEPING_EVERY === 0) {
+        // A webhook that never arrives is a payment stuck at Razorpay: the
+        // periodic sweep pulls their last day, adopts every state we missed
+        // and queues capture for adopted authorizations — the systematic
+        // version of the recovery an operator would do by hand.
+        if (housekeepings % RECONCILE_EVERY === 0) {
+          const now = Math.floor(Date.now() / 1000);
+          const report = await reconcile(sql, razorpay, { from: now - 86_400, to: now });
+          const adopted = await adoptRemoteState(sql, razorpay, report);
+          if (report.exceptions.length > 0) {
+            log.warn(
+              {
+                exceptions: report.exceptions.length,
+                adopted,
+                kinds: [...new Set(report.exceptions.map((e) => e.kind))].join(","),
+              },
+              "reconciliation found disagreements",
+            );
+          }
+        }
+        housekeepings += 1;
         const nonces = await purgeExpired(sql);
         const leases = await reapExpiredLeases(sql);
         const settled = await purgeSettled(sql);
