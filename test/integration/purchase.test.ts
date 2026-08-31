@@ -225,6 +225,35 @@ describe("POST /nonce and POST /purchase", () => {
     expect(response.json().detail).toMatch(/Idempotency-Key/);
   });
 
+  it("refuses oversized keys and control characters at the boundary, never as a 500", async () => {
+    const tooLong = await app.inject({
+      method: "POST",
+      url: "/purchase",
+      headers: { "content-type": "application/json", "idempotency-key": "k".repeat(201) },
+      payload: { actor_id: "usr_8f3ac21e" },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json()).toMatchObject({ outcome: "rejected", at: "schema" });
+
+    // A NUL byte used to reach Postgres and come back as an internal error.
+    const nul = await app.inject({
+      method: "POST",
+      url: "/purchase",
+      headers: { "content-type": "application/json", "idempotency-key": "idem-nul-1" },
+      payload: {
+        actor_id: "usr\u0000evil",
+        nonce: "n".repeat(32),
+        open_jws: "a.b.c",
+        closed_jws: "a.b.c",
+        cart: CART,
+        proposal: PROPOSAL,
+      },
+    });
+    expect(nul.statusCode).toBe(400);
+    expect(nul.json()).toMatchObject({ outcome: "rejected", at: "schema" });
+    expect(await sql`SELECT 1 FROM idempotency_keys`).toHaveLength(0);
+  });
+
   it("denies an out-of-range purchase and still writes the audit record", async () => {
     const issued = await app.inject({
       method: "POST",
@@ -332,5 +361,116 @@ describe("POST /nonce and POST /purchase", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("one-in-flight contention", () => {
+  async function closedFor(openJws: string, nonce: string): Promise<string> {
+    return sign(
+      {
+        vct: CLOSED_MANDATE_VCT,
+        iss: "agent:pricing-bot",
+        sub: "usr_8f3ac21e",
+        aud: AUDIENCE,
+        jti: ulid(),
+        iat: 1_755_700_480,
+        exp: 1_755_700_600,
+        parent_hash: hashJws(openJws),
+        request_hash: digestB64u(canonicalBytes(cartAsCheckout(CART))),
+        nonce,
+        amount: { amount: CART.total_paise, currency: CART.currency },
+        payee: CART.payee,
+        agent: {
+          id: "pricing-bot",
+          version: "1.4.2",
+          model: "claude-opus-5",
+          runtime_sha256: digestB64u(canonicalBytes("runtime")),
+        },
+        chain_depth: 2,
+      } as JsonValue,
+      agent,
+      CLOSED_MANDATE_TYP,
+    );
+  }
+
+  async function issueNonce(): Promise<string> {
+    const issued = await app.inject({
+      method: "POST",
+      url: "/nonce",
+      headers: { "content-type": "application/json" },
+      payload: { issued_to: "usr_8f3ac21e" },
+    });
+    return issued.json().nonce as string;
+  }
+
+  it("rolls back on contention: the nonce survives and the key is released", async () => {
+    const first = await issueNonce();
+    const { openJws, closedJws } = await chainFor(first);
+    const body = (nonce: string, closed: string) => ({
+      actor_id: "usr_8f3ac21e",
+      nonce,
+      open_jws: openJws,
+      closed_jws: closed,
+      cart: CART,
+      proposal: PROPOSAL,
+    });
+    const headers = (key: string) => ({
+      "content-type": "application/json",
+      "idempotency-key": key,
+    });
+
+    const bought = await app.inject({
+      method: "POST",
+      url: "/purchase",
+      headers: headers("idem-contend-1"),
+      payload: body(first, closedJws),
+    });
+    expect(bought.statusCode).toBe(200);
+
+    // A second buy under the same open mandate while the first is still
+    // authorized: AP2's one-in-flight rule refuses it.
+    const second = await issueNonce();
+    const closed2 = await closedFor(openJws, second);
+    const refused = await app.inject({
+      method: "POST",
+      url: "/purchase",
+      headers: headers("idem-contend-2"),
+      payload: body(second, closed2),
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ outcome: "already_in_flight" });
+    expect(refused.headers["retry-after"]).toBeDefined();
+
+    // Contention is not a verdict: the transaction rolled back, so the nonce
+    // was not burned and the key was handed back. A retry under a fresh key
+    // meets the same contention — not a nonce rejection, not a stored 409.
+    const keys = await sql`SELECT idem_key FROM idempotency_keys WHERE idem_key = 'idem-contend-2'`;
+    expect(keys).toHaveLength(0);
+
+    const retried = await app.inject({
+      method: "POST",
+      url: "/purchase",
+      headers: headers("idem-contend-3"),
+      payload: body(second, closed2),
+    });
+    expect(retried.statusCode).toBe(409);
+    expect(retried.json()).toMatchObject({ outcome: "already_in_flight" });
+  });
+});
+
+describe("rate limiting", () => {
+  it("answers the 121st request in a minute with 429 and Retry-After", async () => {
+    let last: Awaited<ReturnType<typeof app.inject>> | undefined;
+    for (let i = 0; i < 121; i += 1) {
+      last = await app.inject({
+        method: "POST",
+        url: "/nonce",
+        headers: { "content-type": "application/json" },
+        payload: { issued_to: "usr_storm" },
+      });
+    }
+    expect(last?.statusCode).toBe(429);
+    expect(last?.json()).toMatchObject({ outcome: "rate_limited" });
+    expect(last?.headers["retry-after"]).toBeDefined();
   });
 });

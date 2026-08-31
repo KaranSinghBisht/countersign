@@ -23,8 +23,8 @@ export const AgentProposalSchema = z
   .object({
     amount_paise: z.number().int().nonnegative(),
     currency: z.enum(CURRENCIES),
-    payee: z.object({ id: z.string().min(1) }),
-    rail: z.string().min(1),
+    payee: z.object({ id: z.string().min(1).max(128) }),
+    rail: z.string().min(1).max(64),
     /** Opaque. Hashed, never inspected. */
     message: z.string().max(4_000).optional(),
   })
@@ -62,13 +62,21 @@ export type GateResult =
       readonly prompt: PromptCommitment;
     };
 
-export function accept(
-  cart: Cart,
-  raw: unknown,
-  constraints: readonly Constraint[],
-  state: SpendState,
-  now: number,
-): GateResult {
+export type GateOnly =
+  | Extract<GateResult, { outcome: "rejected" }>
+  | {
+      readonly outcome: "accepted";
+      readonly proposal: AgentProposal;
+      readonly prompt: PromptCommitment;
+    };
+
+/**
+ * The boundary alone: schema and cart binding, no policy. This is what the
+ * purchase path calls, because the only decision that counts is the one made
+ * under the spend lock on real accounting state. An advisory verdict here
+ * would be computed on a snapshot, and a verdict that exists gets trusted.
+ */
+export function gate(cart: Cart, raw: unknown): GateOnly {
   const parsed = AgentProposalSchema.safeParse(raw);
   if (!parsed.success) {
     return {
@@ -101,6 +109,20 @@ export function accept(
     };
   }
 
+  return { outcome: "accepted", proposal, prompt };
+}
+
+/** Gate, then decide — for callers that own their state (the demo, tests). */
+export function accept(
+  cart: Cart,
+  raw: unknown,
+  constraints: readonly Constraint[],
+  state: SpendState,
+  now: number,
+): GateResult {
+  const gated = gate(cart, raw);
+  if (gated.outcome === "rejected") return gated;
+
   // Cart, not proposal. They happen to be equal after the check above; reading
   // the cart is what keeps a future edit from accidentally trusting the agent.
   const request: PurchaseRequest = {
@@ -113,8 +135,8 @@ export function accept(
   return {
     outcome: "decided",
     decision: decide(constraints, request, state, now),
-    proposal,
-    prompt,
+    proposal: gated.proposal,
+    prompt: gated.prompt,
   };
 }
 

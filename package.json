@@ -2,7 +2,7 @@
   "name": "countersign",
   "version": "0.1.0",
   "private": true,
-  "description": "Merchant-side spend gate and offline verifier. HTTP today is /healthz, /nonce, /purchase, webhooks, and audit export — not a discoverable storefront.",
+  "description": "Merchant-side spend gate and offline verifier. Serves / and /agents.md as discovery documents; no catalog, ACP session, or MCP surface yet.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -13,7 +13,7 @@
     "countersign": "./dist/src/cli/index.js"
   },
   "scripts": {
-    "dev": "tsx watch src/http/server.ts",
+    "dev": "tsx watch --env-file=.env src/http/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/src/http/server.js",
     "test": "vitest run --project unit",

@@ -14,9 +14,9 @@
  */
 
 import rateLimit from "@fastify/rate-limit";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { ulid } from "ulid";
-import { latestCheckpoint, proveInclusion, readByOrder } from "../audit/log.js";
+import { latestCheckpoint, proveConsistency, proveInclusion, readByOrder } from "../audit/log.js";
 import type { Config } from "../config.js";
 import type { JsonValue } from "../crypto/canonical.js";
 import { hex } from "../crypto/encoding.js";
@@ -25,11 +25,24 @@ import type { Sql } from "../db/client.js";
 import { NonceBodySchema, PurchaseBodySchema, purchase } from "../payments/purchase.js";
 import { ingest } from "../razorpay/webhook.js";
 import { issue } from "../spend/nonce.js";
+import { agentsMd, llmsTxt } from "./pages/agents.js";
+import { heroPoster, heroVideo, landingAssets } from "./pages/assets.js";
+import { renderLanding } from "./pages/landing.js";
+import { registerPay } from "./pay.js";
 
 export interface AppDeps {
   readonly sql: Sql;
   readonly config: Pick<Config, "RAZORPAY_WEBHOOK_SECRET"> &
-    Partial<Pick<Config, "WEBHOOK_MAX_AGE_SECONDS" | "COUNTERSIGN_BASE_URL">>;
+    Partial<
+      Pick<
+        Config,
+        | "WEBHOOK_MAX_AGE_SECONDS"
+        | "COUNTERSIGN_BASE_URL"
+        | "RAZORPAY_KEY_ID"
+        | "RAZORPAY_KEY_SECRET"
+        | "RAZORPAY_MODE"
+      >
+    >;
   readonly now?: () => number;
   readonly issuer?: PublicKeyRef;
   readonly audience?: string;
@@ -41,9 +54,106 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // Razorpay's 5s timeout is the budget. A body larger than this is not a
     // webhook, it is an attack.
     bodyLimit: 256 * 1024,
+    // A malformed URL never reaches the error handler below; without this it
+    // answers in Fastify's own envelope, the one shape /agents.md never lists.
+    frameworkErrors: (_error, _request, reply) => {
+      (reply as FastifyReply)
+        .code(400)
+        .send({ outcome: "rejected", at: "schema", detail: "malformed request" });
+    },
+  });
+
+  // Every error leaves in the contract's own shape. Without this, a body that
+  // is not JSON surfaces Fastify's default envelope, a 5xx could carry a
+  // message an agent should never see, and /agents.md would be lying about
+  // the one thing an implementer parses first.
+  app.setErrorHandler((error: { statusCode?: number; message?: string }, _request, reply) => {
+    const status = error.statusCode ?? 500;
+    if (status === 429) {
+      return reply.code(429).send({ outcome: "rate_limited", detail: error.message ?? "" });
+    }
+    if (status >= 400 && status < 500) {
+      return reply
+        .code(status)
+        .send({ outcome: "rejected", at: "schema", detail: error.message ?? "" });
+    }
+    return reply.code(500).send({ outcome: "error", detail: "internal" });
+  });
+
+  // Defense-in-depth headers on every response. The landing page is a fixed
+  // server-rendered string, so the CSP mostly says what it already is: same
+  // origin, inline style and one inline script, no framing anywhere.
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "strict-origin-when-cross-origin");
+    const type = String(reply.getHeader("content-type") ?? "");
+    // A route that must load something external (the payer page loads
+    // Razorpay Checkout) sets its own, narrower-than-default-elsewhere policy.
+    if (type.startsWith("text/html") && !reply.hasHeader("content-security-policy")) {
+      reply.header(
+        "content-security-policy",
+        "default-src 'self'; img-src 'self' data:; media-src 'self'; " +
+          "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; " +
+          "frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
+      );
+    }
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+
+  // The human who pays the order the agent was allowed to place.
+  await registerPay(app, { sql: deps.sql, config: deps.config });
+
+  // Discovery documents: the front door for humans and the contract for buyer
+  // agents. Rendered ONCE here (the base URL only feeds absolute link-preview
+  // meta) — no database read, no per-request templating — so they render
+  // identically offline and cannot leak state. GETs, so they sit outside
+  // every body parser and rate-limit scope.
+  const landingHtml = renderLanding(deps.config.COUNTERSIGN_BASE_URL ?? "");
+  app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(landingHtml));
+  app.get("/agents.md", async (_request, reply) =>
+    reply.type("text/markdown; charset=utf-8").send(agentsMd),
+  );
+  app.get("/llms.txt", async (_request, reply) =>
+    reply.type("text/plain; charset=utf-8").send(llmsTxt),
+  );
+
+  // Safari refuses to play media from a server that ignores Range requests,
+  // so the single-range handling here is a requirement, not an optimization.
+  app.get("/hero-video.mp4", async (request, reply) => {
+    const size = heroVideo.byteLength;
+    reply.header("accept-ranges", "bytes").header("cache-control", "public, max-age=86400");
+
+    const range = header(request.headers.range);
+    const match = range === undefined ? null : /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (match !== null && (match[1] !== "" || match[2] !== "")) {
+      const start = match[1] === "" ? Math.max(0, size - Number(match[2])) : Number(match[1]);
+      const end =
+        match[2] === "" || match[1] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+      if (start > end || start >= size) {
+        return reply.code(416).header("content-range", `bytes */${size}`).send();
+      }
+      return reply
+        .code(206)
+        .header("content-range", `bytes ${start}-${end}/${size}`)
+        .type("video/mp4")
+        .send(heroVideo.subarray(start, end + 1));
+    }
+    return reply.type("video/mp4").send(heroVideo);
+  });
+
+  app.get("/hero-poster.jpg", async (_request, reply) =>
+    reply.type("image/jpeg").header("cache-control", "public, max-age=86400").send(heroPoster),
+  );
+
+  // Pixel-art accents for the landing page. The map is a boot-time allowlist,
+  // so :name is a lookup key — an unknown name is a 404, never a disk read.
+  app.get<{ Params: { name: string } }>("/assets/:name", async (request, reply) => {
+    const asset = landingAssets.get(request.params.name);
+    if (asset === undefined) return reply.code(404).send({ error: "no such asset" });
+    return reply.type(asset.type).header("cache-control", "public, max-age=86400").send(asset.data);
+  });
 
   await app.register(async (scope) => {
     scope.removeContentTypeParser("application/json");
@@ -101,10 +211,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       },
     );
 
-    scope.post("/nonce", async (request, reply) => {
+    // Route-level body limits: the global 256 KB is the webhook's budget, not
+    // a nonce request's. A purchase carries two JWSes and a cart — 32 KB is
+    // generous; anything larger is not a buyer.
+    scope.post("/nonce", { bodyLimit: 1024 }, async (request, reply) => {
       const parsed = NonceBodySchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ outcome: "malformed", detail: "issued_to is required" });
+        return reply
+          .code(400)
+          .send({ outcome: "rejected", at: "schema", detail: "issued_to is required" });
       }
       const issued = await issue(deps.sql, parsed.data.issued_to);
       return reply.code(200).send({
@@ -113,22 +228,27 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       });
     });
 
-    scope.post("/purchase", async (request, reply) => {
+    scope.post("/purchase", { bodyLimit: 32 * 1024 }, async (request, reply) => {
       if (deps.issuer === undefined || deps.audience === undefined) {
         return reply.code(503).send({ outcome: "unavailable", detail: "issuer is not configured" });
       }
 
       const idempotencyKey = header(request.headers["idempotency-key"]);
-      if (idempotencyKey === undefined || idempotencyKey.length === 0) {
+      if (
+        idempotencyKey === undefined ||
+        idempotencyKey.length === 0 ||
+        idempotencyKey.length > 200
+      ) {
         return reply
           .code(400)
-          .send({ outcome: "malformed", detail: "Idempotency-Key is required" });
+          .send({ outcome: "rejected", at: "schema", detail: "Idempotency-Key is required" });
       }
 
       const parsed = PurchaseBodySchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({
-          outcome: "malformed",
+          outcome: "rejected",
+          at: "schema",
           detail: parsed.error.issues
             .slice(0, 4)
             .map((i) => (i.path.length > 0 ? `${i.path.join(".")}: ${i.message}` : i.message))
@@ -173,44 +293,88 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     });
   });
 
-  app.get("/audit/checkpoint", async (_request, reply) => {
-    const latest = await latestCheckpoint(deps.sql);
-    if (latest === undefined) return reply.code(404).send({ error: "no checkpoint published" });
+  // Public and read-only, but a scope of its own: each proof walks the log
+  // prefix, and an unthrottled scraper would turn that into a CPU bill.
+  await app.register(async (scope) => {
+    await scope.register(rateLimit, { max: 60, timeWindow: "1 minute" });
 
-    return {
-      origin: latest.checkpoint.origin,
-      size: latest.checkpoint.size,
-      root: hex(latest.checkpoint.rootHash),
-      note: latest.note,
-      created_at: latest.createdAt.toISOString(),
-    };
-  });
+    scope.get("/audit/checkpoint", async (_request, reply) => {
+      const latest = await latestCheckpoint(deps.sql);
+      if (latest === undefined) return reply.code(404).send({ error: "no checkpoint published" });
 
-  app.get<{ Querystring: { seq?: string } }>("/audit/proof", async (request, reply) => {
-    const seq = Number(request.query.seq);
-    if (!Number.isInteger(seq) || seq < 0) {
-      return reply.code(400).send({ error: "seq must be a non-negative integer" });
-    }
-
-    try {
-      const evidence = await proveInclusion(deps.sql, seq);
       return {
-        seq: evidence.seq,
-        tree_size: evidence.treeSize,
+        origin: latest.checkpoint.origin,
+        size: latest.checkpoint.size,
+        root: hex(latest.checkpoint.rootHash),
+        note: latest.note,
+        created_at: latest.createdAt.toISOString(),
+      };
+    });
+
+    // Proofs are against the latest SIGNED root, never the unsigned tip: a
+    // proof nobody has committed to proves nothing to a third party. A record
+    // past the sealed prefix is "not yet sealed" until the worker's next tick.
+    scope.get<{ Querystring: { seq?: string } }>("/audit/proof", async (request, reply) => {
+      if (!/^\d{1,12}$/.test(request.query.seq ?? "")) {
+        return reply.code(400).send({ error: "seq must be a non-negative integer" });
+      }
+      const seq = Number(request.query.seq);
+      const latest = await latestCheckpoint(deps.sql);
+      if (latest === undefined) return reply.code(404).send({ error: "no checkpoint published" });
+      if (seq >= latest.checkpoint.size) {
+        return reply.code(404).send({
+          error:
+            `seq ${seq} is not yet sealed by a checkpoint (sealed size ` +
+            `${latest.checkpoint.size}); retry after the next worker tick`,
+        });
+      }
+
+      const evidence = await proveInclusion(deps.sql, seq, latest.checkpoint.size);
+      return {
+        seq,
+        tree_size: latest.checkpoint.size,
         leaf_hash: hex(evidence.leafHash),
         root: hex(evidence.root),
         proof: evidence.proof.map(hex),
+        checkpoint_note: latest.note,
       };
-    } catch (error) {
-      if (error instanceof RangeError) return reply.code(404).send({ error: error.message });
-      throw error;
-    }
-  });
+    });
 
-  app.get<{ Params: { id: string } }>("/audit/orders/:id", async (request, reply) => {
-    const records = await readByOrder(deps.sql, request.params.id);
-    if (records.length === 0) return reply.code(404).send({ error: "no records for that order" });
-    return { order_id: request.params.id, records };
+    // Consistency between an earlier sealed size and the latest: the proof
+    // that the log only ever grew, which is the claim an audit log makes.
+    scope.get<{ Querystring: { from?: string } }>("/audit/consistency", async (request, reply) => {
+      if (!/^\d{1,12}$/.test(request.query.from ?? "")) {
+        return reply.code(400).send({ error: "from must be a non-negative integer" });
+      }
+      const from = Number(request.query.from);
+      const latest = await latestCheckpoint(deps.sql);
+      if (latest === undefined) return reply.code(404).send({ error: "no checkpoint published" });
+      if (from > latest.checkpoint.size) {
+        return reply
+          .code(404)
+          .send({ error: `from ${from} exceeds the sealed size ${latest.checkpoint.size}` });
+      }
+
+      const { proof } = await proveConsistency(deps.sql, from, latest.checkpoint.size);
+      return {
+        from,
+        to: latest.checkpoint.size,
+        root: hex(latest.checkpoint.rootHash),
+        proof: proof.map(hex),
+        checkpoint_note: latest.note,
+      };
+    });
+
+    scope.get<{ Params: { id: string } }>("/audit/orders/:id", async (request, reply) => {
+      // Razorpay ids are short and alphanumeric; anything else is refused at
+      // the boundary rather than handed to Postgres to choke on.
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(request.params.id)) {
+        return reply.code(400).send({ error: "order id must be 1–64 characters of [A-Za-z0-9_-]" });
+      }
+      const records = await readByOrder(deps.sql, request.params.id);
+      if (records.length === 0) return reply.code(404).send({ error: "no records for that order" });
+      return { order_id: request.params.id, records };
+    });
   });
 
   return app;

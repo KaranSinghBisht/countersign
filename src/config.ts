@@ -55,6 +55,14 @@ const ConfigSchema = z.object({
   /** Distinct from the API key secret. Signs webhook bodies; rotated separately. */
   RAZORPAY_WEBHOOK_SECRET: Secret,
   /**
+   * `fake` swaps the outbox worker's Razorpay client for the in-memory one
+   * the tests use, so a laptop without test-mode credentials still creates
+   * "orders" and the whole loop — order id, receipt, /audit/orders — can be
+   * walked. Refused in production: nothing fake may stand behind a real
+   * public URL.
+   */
+  RAZORPAY_MODE: z.enum(["live", "fake"]).default("live"),
+  /**
    * Razorpay retries a webhook for 24 hours, so a delivery can legitimately
    * arrive a day late. Copying Stripe's 5-minute tolerance here would reject
    * exactly the retries the replay window exists to accept.

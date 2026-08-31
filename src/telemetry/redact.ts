@@ -37,6 +37,22 @@ export const SAFE_KEYS: ReadonlySet<string> = new Set([
   "idempotency_key",
   "seq",
 
+  // Operational facts about this process, not about anyone — redacting the
+  // listen port and the shutdown signal made the two most useful log lines
+  // unreadable.
+  "port",
+  "signal",
+  "nonces",
+  "leases",
+  "settled",
+  "events",
+  "outbox_done",
+  "size",
+  "outbox_id",
+  "kind",
+  "outcome",
+  "detail",
+
   // Domain identifiers we mint or that identify a thing, not a person
   "order_id",
   "payment_id",

@@ -35,6 +35,81 @@ beforeEach(async () => {
   await truncateAll(sql);
 });
 
+describe("discovery documents", () => {
+  it("serves the landing page for humans at /", async () => {
+    const response = await app.inject({ method: "GET", url: "/" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.body).toContain("COUNTERSIGN");
+    expect(response.body).toContain("/agents.md");
+  });
+
+  it("serves the buyer-agent contract at /agents.md", async () => {
+    const response = await app.inject({ method: "GET", url: "/agents.md" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/markdown");
+    expect(response.body).toContain("POST /nonce");
+    expect(response.body).toContain("Idempotency-Key");
+    // The honesty clause travels with the contract, not just the README.
+    expect(response.body).toContain("Not built, said plainly");
+  });
+
+  it("serves the crawler pointer at /llms.txt", async () => {
+    const response = await app.inject({ method: "GET", url: "/llms.txt" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/plain");
+    expect(response.body).toContain("/agents.md");
+  });
+});
+
+describe("hero media", () => {
+  it("serves the hero loop with single-range support", async () => {
+    const full = await app.inject({ method: "GET", url: "/hero-video.mp4" });
+    expect(full.statusCode).toBe(200);
+    expect(full.headers["content-type"]).toContain("video/mp4");
+    expect(full.headers["accept-ranges"]).toBe("bytes");
+
+    // Safari will not play media unless ranged reads actually work.
+    const part = await app.inject({
+      method: "GET",
+      url: "/hero-video.mp4",
+      headers: { range: "bytes=0-99" },
+    });
+    expect(part.statusCode).toBe(206);
+    expect(part.headers["content-range"]).toMatch(/^bytes 0-99\/\d+$/);
+    expect(part.rawPayload.byteLength).toBe(100);
+
+    const unsatisfiable = await app.inject({
+      method: "GET",
+      url: "/hero-video.mp4",
+      headers: { range: "bytes=999999999-" },
+    });
+    expect(unsatisfiable.statusCode).toBe(416);
+  });
+
+  it("serves the reduced-motion poster", async () => {
+    const poster = await app.inject({ method: "GET", url: "/hero-poster.jpg" });
+    expect(poster.statusCode).toBe(200);
+    expect(poster.headers["content-type"]).toContain("image/jpeg");
+  });
+
+  it("serves pixel-art accents from the boot-time allowlist only", async () => {
+    const png = await app.inject({ method: "GET", url: "/assets/ledger.png" });
+    expect(png.statusCode).toBe(200);
+    expect(png.headers["content-type"]).toContain("image/png");
+
+    const svg = await app.inject({ method: "GET", url: "/assets/verified-stamp.svg" });
+    expect(svg.statusCode).toBe(200);
+    expect(svg.headers["content-type"]).toContain("image/svg");
+
+    // A name outside the allowlist is a 404 — never a path lookup.
+    expect((await app.inject({ method: "GET", url: "/assets/..%2F..%2F.env" })).statusCode).toBe(
+      404,
+    );
+    expect((await app.inject({ method: "GET", url: "/assets/nope.png" })).statusCode).toBe(404);
+  });
+});
+
 describe("POST /webhooks/razorpay", () => {
   it("verifies the signature over the bytes as sent, not a reserialised body", async () => {
     // Compact-with-spaces is what a global JSON parser would "fix". The
@@ -95,7 +170,7 @@ describe("POST /webhooks/razorpay", () => {
 });
 
 describe("GET /audit/*", () => {
-  async function seedRecord(orderId: string) {
+  async function seedRecord(orderId: string | null) {
     return sql.begin((tx) =>
       append(tx, {
         ts: new Date(NOW * 1000).toISOString(),
@@ -164,16 +239,34 @@ describe("GET /audit/*", () => {
     expect(response.json().size).toBe(1);
   });
 
-  it("serves an inclusion proof for a known seq", async () => {
+  it("proves inclusion against the signed checkpoint, never the unsigned tip", async () => {
     await seedRecord("order_proof");
+
+    // Appended but not yet sealed: there is nothing signed to prove against.
+    expect((await app.inject({ method: "GET", url: "/audit/proof?seq=0" })).statusCode).toBe(404);
+
+    const key = await generateKey("Ed25519");
+    const { note } = await publishCheckpoint(
+      sql,
+      "countersign.dev/audit",
+      "countersign.dev/audit",
+      key,
+    );
 
     const ok = await app.inject({ method: "GET", url: "/audit/proof?seq=0" });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json()).toMatchObject({ seq: 0, tree_size: 1 });
+    expect(ok.json()).toMatchObject({ seq: 0, tree_size: 1, checkpoint_note: note });
     expect(ok.json().proof).toEqual([]);
+
+    const consistency = await app.inject({ method: "GET", url: "/audit/consistency?from=0" });
+    expect(consistency.statusCode).toBe(200);
+    expect(consistency.json()).toMatchObject({ from: 0, to: 1, proof: [] });
 
     expect((await app.inject({ method: "GET", url: "/audit/proof?seq=4" })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: "/audit/proof" })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/audit/proof?seq=0x10" })).statusCode).toBe(
+      400,
+    );
   });
 
   it("returns every record for an order", async () => {
@@ -187,5 +280,20 @@ describe("GET /audit/*", () => {
     expect(
       (await app.inject({ method: "GET", url: "/audit/orders/order_missing" })).statusCode,
     ).toBe(404);
+  });
+
+  it("resolves an order through its payment, since a live record never carries one", async () => {
+    // Appended at intent time with order_id null — exactly what /purchase writes.
+    const record = await seedRecord(null);
+    await sql`
+      INSERT INTO payments (receipt, authorization_id, open_jti, closed_jti, order_id, amount_minor, currency, state)
+      VALUES ('rcpt_live', ${testId()}, ${record.mandate.open_jti}, ${record.mandate.closed_jti},
+              'order_live', 1000, 'INR', 'created')
+    `;
+
+    const found = await app.inject({ method: "GET", url: "/audit/orders/order_live" });
+    expect(found.statusCode).toBe(200);
+    expect(found.json().records).toHaveLength(1);
+    expect(found.json().records[0].mandate.closed_jti).toBe(record.mandate.closed_jti);
   });
 });

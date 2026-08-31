@@ -78,12 +78,16 @@ export async function append(tx: TransactionSql, input: AppendInput): Promise<Au
   return record;
 }
 
-export async function size(sql: Sql): Promise<number> {
+export async function size(sql: Sql | TransactionSql): Promise<number> {
   const rows = await sql<{ next_seq: bigint }[]>`SELECT next_seq FROM audit_head WHERE id = TRUE`;
   return Number(rows[0]?.next_seq ?? 0);
 }
 
-export async function read(sql: Sql, from = 0, limit = 1000): Promise<AuditRecord[]> {
+export async function read(
+  sql: Sql | TransactionSql,
+  from = 0,
+  limit = 1000,
+): Promise<AuditRecord[]> {
   const rows = await sql<{ record: AuditRecord }[]>`
 		SELECT record FROM audit_records
 		 WHERE seq >= ${from}
@@ -93,9 +97,22 @@ export async function read(sql: Sql, from = 0, limit = 1000): Promise<AuditRecor
   return rows.map((r) => r.record);
 }
 
+/**
+ * Every record behind a Razorpay order.
+ *
+ * A live record is appended at intent time, before the worker has talked to
+ * Razorpay, and is immutable afterwards — so its own `order_id` is null. The
+ * order is known to the payment row instead; resolving through it is what
+ * lets a settlement dispute walk from an order id back to the decision.
+ */
 export async function readByOrder(sql: Sql, orderId: string): Promise<AuditRecord[]> {
   const rows = await sql<{ record: AuditRecord }[]>`
-		SELECT record FROM audit_records WHERE order_id = ${orderId} ORDER BY seq
+		SELECT record FROM audit_records
+		 WHERE order_id = ${orderId}
+		    OR record->'mandate'->>'closed_jti' IN (
+		         SELECT closed_jti FROM payments WHERE order_id = ${orderId}
+		       )
+		 ORDER BY seq
 	`;
   return rows.map((r) => r.record);
 }
@@ -116,11 +133,44 @@ export function leafFor(record: AuditRecord): Uint8Array {
   return utf8(record.record_hash);
 }
 
-async function leaves(sql: Sql, upTo: number): Promise<Uint8Array[]> {
-  const rows = await sql<{ record_hash: string }[]>`
-		SELECT record_hash FROM audit_records WHERE seq < ${upTo} ORDER BY seq
-	`;
-  return rows.map((r) => utf8(r.record_hash));
+// Prefix cache for the Merkle view. The log is append-only and a sealed
+// record never changes, so a hash read once stays valid; every proof used to
+// re-read the entire log, which made a public, unauthenticated endpoint cost
+// O(records) per request forever. The one thing that can invalidate a prefix
+// is the log being reset underneath a live process (a test truncate), which
+// the tail check catches by re-reading a single row.
+let cachedHashes: string[] = [];
+let cachedLeaves: Uint8Array[] = [];
+
+async function leaves(sql: Sql | TransactionSql, upTo: number): Promise<Uint8Array[]> {
+  if (cachedHashes.length > 0) {
+    const tail = cachedHashes.length - 1;
+    const check = await sql<{ record_hash: string }[]>`
+			SELECT record_hash FROM audit_records WHERE seq = ${tail}
+		`;
+    if (check[0]?.record_hash !== cachedHashes[tail]) {
+      cachedHashes = [];
+      cachedLeaves = [];
+    }
+  }
+
+  if (cachedHashes.length < upTo) {
+    const rows = await sql<{ seq: number | bigint; record_hash: string }[]>`
+			SELECT seq, record_hash FROM audit_records
+			 WHERE seq >= ${cachedHashes.length} AND seq < ${upTo}
+			 ORDER BY seq
+		`;
+    for (const r of rows) {
+      // Two concurrent readers can both fetch the same tail; only the first
+      // to arrive extends the cache, the other's rows are already present.
+      // (The driver returns int8 as bigint — compare as a number.)
+      if (Number(r.seq) !== cachedHashes.length) continue;
+      cachedHashes.push(r.record_hash);
+      cachedLeaves.push(utf8(r.record_hash));
+    }
+  }
+
+  return cachedLeaves.slice(0, upTo);
 }
 
 export async function treeRoot(sql: Sql, treeSize?: number): Promise<Uint8Array> {
@@ -153,6 +203,34 @@ export async function proveInclusion(
     proof: inclusionProof(seq, entries),
     root: root(entries),
   };
+}
+
+/**
+ * Inclusion evidence for many records from ONE read of the leaves — what an
+ * export wants. Calling proveInclusion per record re-reads the prefix each
+ * time, which made exporting quadratic in the size of the log.
+ */
+export async function proveInclusionMany(
+  sql: Sql | TransactionSql,
+  seqs: readonly number[],
+  treeSize: number,
+): Promise<Map<number, InclusionEvidence>> {
+  const entries = await leaves(sql, treeSize);
+  const treeRootHash = root(entries);
+  const out = new Map<number, InclusionEvidence>();
+  for (const seq of seqs) {
+    if (seq < 0 || seq >= treeSize) {
+      throw new RangeError(`seq ${seq} is outside a log of size ${treeSize}`);
+    }
+    out.set(seq, {
+      seq,
+      treeSize,
+      leafHash: leafHash(entries[seq] as Uint8Array),
+      proof: inclusionProof(seq, entries),
+      root: treeRootHash,
+    });
+  }
+  return out;
 }
 
 export async function proveConsistency(
@@ -220,14 +298,18 @@ export async function publishCheckpoint(
 }
 
 /** Every published checkpoint, oldest first. The exporter ships all of them. */
-export async function allCheckpoints(sql: Sql): Promise<{ size: number; note: string }[]> {
+export async function allCheckpoints(
+  sql: Sql | TransactionSql,
+): Promise<{ size: number; note: string }[]> {
   const rows = await sql<{ tree_size: bigint; note: string }[]>`
 		SELECT tree_size, note FROM checkpoints ORDER BY tree_size
 	`;
   return rows.map((row) => ({ size: Number(row.tree_size), note: row.note }));
 }
 
-export async function latestCheckpoint(sql: Sql): Promise<CheckpointRecord | undefined> {
+export async function latestCheckpoint(
+  sql: Sql | TransactionSql,
+): Promise<CheckpointRecord | undefined> {
   const rows = await sql<
     { tree_size: bigint; root_hash: Buffer; note: string; created_at: Date }[]
   >`

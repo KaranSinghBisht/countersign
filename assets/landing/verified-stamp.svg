@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="392" height="168" viewBox="-16 -24 392 168">
+  <g transform="rotate(-6 180 60)" fill="none" stroke="#08745d" stroke-width="4">
+    <rect x="8" y="8" width="344" height="104" rx="4"/>
+    <rect x="17" y="17" width="326" height="86" rx="2" stroke-width="2"/>
+  </g>
+  <g transform="rotate(-6 180 60)" text-anchor="middle" fill="#08745d" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="180" y="58" font-size="27" font-weight="700" letter-spacing="5">VERIFIED</text>
+    <text x="180" y="85" font-size="15" letter-spacing="2">30 / 30 checks · exit 0</text>
+  </g>
+</svg>

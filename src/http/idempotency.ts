@@ -144,6 +144,22 @@ export async function complete(
 	`;
 }
 
+/**
+ * Give a key back without recording an answer.
+ *
+ * For outcomes that are true of this attempt only — contention with another
+ * authorization, an internal error — not of the request. Recording those
+ * would replay a transient failure to every retry for the retention window,
+ * which is the opposite of what the header is for. Only an in_flight row can
+ * be released: a settled answer is never un-said.
+ */
+export async function release(sql: Sql, actorId: string, key: string): Promise<void> {
+  await sql`
+		DELETE FROM idempotency_keys
+		 WHERE actor_id = ${actorId} AND idem_key = ${key} AND state = 'in_flight'
+	`;
+}
+
 async function load(sql: Sql, actorId: string, key: string): Promise<KeyRow | undefined> {
   const rows = await sql<KeyRow[]>`
 		SELECT
