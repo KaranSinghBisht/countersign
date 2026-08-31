@@ -62,8 +62,9 @@ exported bundle.
 
 Permitted is not paid. With real `rzp_test_` keys in `.env`, `make buy` ends
 with a link — `pay it (Razorpay test mode): …/pay/order_…` — the order the
-worker just created on Razorpay. Open it, pay with the test card
-(4111 1111 1111 1111) and say what happens on screen: Razorpay returns a
+worker just created on Razorpay. Open it, pay with Netbanking → any bank →
+Success (or the domestic test card 5267 3181 8797 5449; 4111… counts as
+international and is refused by default) and say what happens on screen: Razorpay returns a
 signature over `order_id|payment_id`, the server verifies it with the key
 secret, and a capture is queued; the `payment.captured` webhook then arrives
 independently and lands as a balanced ledger posting. The order and the

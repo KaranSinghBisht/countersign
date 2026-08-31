@@ -81,7 +81,7 @@ export function renderPayPage(input: PayPageInput): string {
       <dt>state</dt><dd id="state">${escapeHtml(input.state)}</dd>
     </dl>
     <button id="pay" type="button"${settled ? " disabled" : ""}>${settled ? "Already settled" : `Pay ${escapeHtml(amount)} with Razorpay`}</button>
-    <p class="note">Test card 4111 1111 1111 1111, any future expiry, any CVV — or UPI <code>success@razorpay</code>. No money moves in test mode.</p>
+    <p class="note">Test mode: Netbanking → any bank → Success, or domestic test card 5267 3181 8797 5449 (any future expiry, any CVV). 4111… is an international card and is refused by default. No money moves.</p>
     <div id="result"></div>
   </div>
 </main>
@@ -115,6 +115,11 @@ export function renderPayPage(input: PayPageInput): string {
       order_id: orderId,
       name: "Countersign",
       description: "receipt " + ${scriptString(input.receipt)},
+      // Checkout asks for an email it has no use for here; prefilled so the
+      // test payment is card number, expiry, CVV and done.
+      prefill: { email: "payer@countersign.example" },
+      // No "save this card" prompt: its OTP goes to a number nobody holds.
+      remember_customer: false,
       theme: { color: "#08745d" },
       handler: complete,
       modal: { ondismiss: function () { show("checkout closed without paying", ""); } }
