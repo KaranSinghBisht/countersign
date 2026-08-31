@@ -63,8 +63,13 @@ const app = await buildApp({
   audience: cfg.COUNTERSIGN_BASE_URL,
 });
 
-if (cfg.RAZORPAY_MODE === "fake" && isProduction(cfg)) {
-  log.error("RAZORPAY_MODE=fake is refused in production");
+// The fake rail may never stand behind a public URL, whatever NODE_ENV says.
+// A deployment reachable at a non-local origin is production regardless of the
+// env label, so the interlock keys on the origin, not only on NODE_ENV.
+const baseHost = new URL(cfg.COUNTERSIGN_BASE_URL).hostname;
+const publicOrigin = !["localhost", "127.0.0.1", "::1", "[::1]"].includes(baseHost);
+if (cfg.RAZORPAY_MODE === "fake" && (isProduction(cfg) || publicOrigin)) {
+  log.error("RAZORPAY_MODE=fake is refused for a production or public deployment");
   await sql.end().catch(() => undefined);
   process.exit(1);
 }

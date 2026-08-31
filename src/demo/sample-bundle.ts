@@ -557,6 +557,7 @@ export async function writeDemoExport(dir: string): Promise<{ bundle: string; tr
         request_hash: b.requestHash,
         order_id: (b.record.external as { order_id: string }).order_id,
         payment_id: (b.record.external as { payment_id: string }).payment_id,
+        signature_verified: true,
         amount_paise: closed.total_paise,
         currency: "INR",
         seq: b.record.seq,

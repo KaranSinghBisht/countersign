@@ -69,7 +69,8 @@ describe("GET /pay", () => {
 
     expect(page.statusCode).toBe(200);
     expect(page.headers["content-type"]).toContain("text/html");
-    expect(page.headers["content-security-policy"]).toContain("https://checkout.razorpay.com");
+    const csp = String(page.headers["content-security-policy"]);
+    expect(csp).toContain("https://checkout.razorpay.com");
     expect(page.headers["cache-control"]).toBe("no-store");
     expect(page.body).toContain("checkout.razorpay.com/v1/checkout.js");
     expect(page.body).toContain(KEY_ID);
@@ -78,6 +79,13 @@ describe("GET /pay", () => {
     expect(page.body).toContain("₹14,990.00");
     // The key SECRET never reaches the browser.
     expect(page.body).not.toContain(KEY_SECRET);
+
+    // The inline bootstrap runs by a per-response nonce, not 'unsafe-inline':
+    // an injected inline <script> that slipped past escaping still cannot run.
+    const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1];
+    expect(nonce, "CSP script-src must carry a nonce").toBeTruthy();
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(page.body).toContain(`<script nonce="${nonce}">`);
   });
 
   it("finds the page by receipt once the worker has created the order", async () => {

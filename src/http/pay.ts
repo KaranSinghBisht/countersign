@@ -14,6 +14,7 @@
  * a fake order cannot be paid, and there is nothing to pay in the tests.
  */
 
+import { randomBytes } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -21,7 +22,7 @@ import type { Config } from "../config.js";
 import type { Sql } from "../db/client.js";
 import { captureAuthorized } from "../razorpay/capture.js";
 import { attachSignature } from "../razorpay/settle.js";
-import { PAY_PAGE_CSP, renderPayPage } from "./pages/pay.js";
+import { payPageCsp, renderPayPage } from "./pages/pay.js";
 
 export interface PayDeps {
   readonly sql: Sql;
@@ -94,19 +95,23 @@ export async function registerPay(app: FastifyInstance, deps: PayDeps): Promise<
       }
       const row = await byOrder(deps.sql, request.params.order_id);
       if (row === undefined) return reply.code(404).send({ error: "no such order here" });
+      const nonce = randomBytes(16).toString("base64");
       return reply
-        .header("content-security-policy", PAY_PAGE_CSP)
+        .header("content-security-policy", payPageCsp(nonce))
         .header("cache-control", "no-store")
         .type("text/html; charset=utf-8")
         .send(
-          renderPayPage({
-            keyId: keyId as string,
-            orderId: request.params.order_id,
-            receipt: row.receipt,
-            amountMinor: row.amount_minor,
-            currency: row.currency,
-            state: row.state,
-          }),
+          renderPayPage(
+            {
+              keyId: keyId as string,
+              orderId: request.params.order_id,
+              receipt: row.receipt,
+              amountMinor: row.amount_minor,
+              currency: row.currency,
+              state: row.state,
+            },
+            nonce,
+          ),
         );
     });
 

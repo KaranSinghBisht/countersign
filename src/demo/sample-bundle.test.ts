@@ -34,9 +34,14 @@ describe("the demo export bundle", () => {
     expect(report.ok).toBe(true);
     expect(report.passed).toBe(30);
 
-    const decisions = loadBundle(bundle).records.map((r) => r.decision);
+    const loaded = loadBundle(bundle);
+    const decisions = loaded.records.map((r) => r.decision);
     expect(decisions).toContain("ALLOW");
     expect(decisions).toContain("DENY");
     expect(decisions).toContain("ESCALATE");
+
+    // The settled record's receipt carries the (merchant-asserted) signature fact.
+    const receipt = [...loaded.receipts.values()][0];
+    expect(receipt?.signature_verified).toBe(true);
   });
 });

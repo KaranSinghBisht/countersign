@@ -43,7 +43,7 @@ function amountLabel(amountMinor: bigint, currency: string): string {
     : `${amountMinor} ${currency}`;
 }
 
-export function renderPayPage(input: PayPageInput): string {
+export function renderPayPage(input: PayPageInput, nonce: string): string {
   const amount = amountLabel(input.amountMinor, input.currency);
   const settled = input.state === "captured" || input.state === "refunded";
   return `<!doctype html>
@@ -86,7 +86,7 @@ export function renderPayPage(input: PayPageInput): string {
   </div>
 </main>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-<script>
+<script nonce="${nonce}">
 (function () {
   var orderId = ${scriptString(input.orderId)};
   var out = document.getElementById("result");
@@ -136,10 +136,18 @@ export function renderPayPage(input: PayPageInput): string {
 `;
 }
 
-/** What the browser may load on the payer page and nowhere else. */
-export const PAY_PAGE_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; " +
-  "frame-src https://api.razorpay.com https://checkout.razorpay.com; " +
-  "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com https://lumberjack-cx.razorpay.com; " +
-  "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; " +
-  "frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
+/**
+ * What the browser may load on the payer page and nowhere else. The one inline
+ * script (the Checkout bootstrap) is allowed by a per-response nonce rather
+ * than `'unsafe-inline'`, so a value that somehow slipped past escaping still
+ * cannot execute as an injected inline script.
+ */
+export function payPageCsp(nonce: string): string {
+  return (
+    `default-src 'self'; script-src 'nonce-${nonce}' https://checkout.razorpay.com; ` +
+    "frame-src https://api.razorpay.com https://checkout.razorpay.com; " +
+    "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com https://lumberjack-cx.razorpay.com; " +
+    "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; " +
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+  );
+}

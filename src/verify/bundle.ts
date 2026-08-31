@@ -73,6 +73,12 @@ export const ReceiptSchema = z
     request_hash: z.string().min(1),
     order_id: z.string().nullable(),
     payment_id: z.string().nullable(),
+    // Razorpay's own attestation, over a secret only they and the merchant
+    // hold, that this payment belongs to this order. The offline verifier
+    // cannot re-check that HMAC (it has no key secret), so it is exported for
+    // transparency as a merchant-asserted fact, not proven here — see
+    // docs/LIMITATIONS.md.
+    signature_verified: z.boolean().optional(),
     amount_paise: z.number().int().nonnegative(),
     currency: z.string().length(3),
     seq: z.number().int().nonnegative(),

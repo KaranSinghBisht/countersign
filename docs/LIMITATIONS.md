@@ -18,6 +18,8 @@ Copied from the build plan §7 so a reviewer does not have to hunt.
 
 6. **No trusted timestamps.** `ts` on an audit record is self-asserted; an operator can backdate. Razorpay's `created_at` on the order is an independent lower bound and we record it. Remedy: RFC 3161 or a witness cosignature that carries its own time.
 
+6a. **The payment-signature fact is merchant-asserted, not proven offline.** Razorpay signs `order_id|payment_id` with the API key secret, and we verify it before recording `signature_verified` — a real external attestation. But the offline verifier has no key secret, so it cannot re-check that HMAC; the exported receipt carries `signature_verified` for transparency, not as something a third party can recompute. What the bundle *does* prove offline is that the receipt binds the exact order and payment the decision was made for. Remedy: have the buyer's principal verify the payment signature against Razorpay directly, or a Razorpay-cosigned receipt the verifier can check against a Razorpay public key.
+
 7. **Bounded ≠ wise.** If a user authorises ₹2.5 lakh for "inventory restock" and the agent picks the wrong SKU from an allowed supplier, every check passes. Cryptography constrains authority; it does not confer judgment.
 
 8. **Agent identity is self-asserted.** `agent.version`, `model`, `runtime_sha256` are claims the agent makes about itself. Real remote attestation needs RFC 9334 RATS with hardware evidence.

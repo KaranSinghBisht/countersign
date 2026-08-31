@@ -111,8 +111,10 @@ async function exportWithin(sql: TransactionSql, dir: string): Promise<LiveExpor
     const requestHash = digestB64u(canonicalBytes(artifact.checkout));
     const receipt = deriveReceipt(record.mandate.closed_jti, requestHash);
     const payment = (
-      await sql<{ order_id: string | null; payment_id: string | null }[]>`
-				SELECT order_id, payment_id FROM payments WHERE receipt = ${receipt}
+      await sql<
+        { order_id: string | null; payment_id: string | null; signature_verified: boolean }[]
+      >`
+				SELECT order_id, payment_id, signature_verified FROM payments WHERE receipt = ${receipt}
 			`
     )[0];
 
@@ -124,6 +126,7 @@ async function exportWithin(sql: TransactionSql, dir: string): Promise<LiveExpor
       request_hash: requestHash,
       order_id: payment?.order_id ?? null,
       payment_id: payment?.payment_id ?? null,
+      signature_verified: payment?.signature_verified ?? false,
       amount_paise: record.accounting.amount_paise,
       currency: record.accounting.currency,
       seq: record.seq,
