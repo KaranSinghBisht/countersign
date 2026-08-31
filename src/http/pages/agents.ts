@@ -79,7 +79,10 @@ extra fields are rejected, not ignored.
 - \`400 {"outcome": "rejected", "at": "mandate" | "nonce" | "schema" | "cart_binding", "detail"}\`
   — \`schema\` covers a malformed body, an unknown field, a body that is not
   JSON, and a missing \`Idempotency-Key\` header. \`at: "mandate"\` also
-  carries \`code\` (e.g. \`expired\`, \`not_yet_valid\`, \`wrong_audience\`).
+  carries \`code\`: one of \`malformed\`, \`open_signature_invalid\`,
+  \`closed_signature_invalid\`, \`parent_binding_invalid\`, \`claims_disagree\`
+  (wrong audience, subject or nonce), \`not_attenuated\`,
+  \`request_binding_invalid\`, \`expired\`, \`not_yet_valid\`.
 - \`403 {"outcome": "denied", "reason", "decided_by", "audit"}\` — a named rule
   (e.g. \`R-BUD-INR\`) refused. Logged with counterfactual accounting.
 - \`403 {"outcome": "escalate", "reason", "decided_by", "audit"}\` — above the
@@ -94,12 +97,21 @@ extra fields are rejected, not ignored.
   and resend. The slot frees when the payment settles — or when Razorpay
   refuses the order, so a refused order cannot wedge a mandate.
   \`409 {"outcome": "replayed", "closed_jti"}\` — that closed mandate was
-  already used; sign a new one. No audit record is written for a 409: no
-  decision was made.
+  already used; sign a new one. In practice you will see \`at: "nonce"\` with
+  \`code: "already_used"\` first, because the nonce is single-use and is
+  checked before the closed-mandate replay guard: resubmitting the same
+  \`(nonce, closed_jws)\` is refused at the nonce. The replay guard is the
+  backstop for a mandate re-presented under a fresh nonce. No audit record is
+  written for any 409: no decision was made.
 - \`422 {"outcome": "mismatch", "detail"}\` — Idempotency-Key reused with a
   different body.
 - \`429 {"outcome": "rate_limited", "detail"}\` with \`Retry-After\` — 120
-  requests/min/IP on /nonce and /purchase, 60/min on /audit/*.
+  requests/min/IP on /nonce and /purchase; /audit/* shares one 60/min/IP
+  bucket across all of its routes.
+- Under one open mandate only one purchase may be in flight at a time
+  (AP2), independent of budget headroom: concurrent buys under the same
+  mandate answer \`already_in_flight\` until the first settles, even when the
+  budget would admit more. Parallelism is across DISTINCT open mandates.
 - \`500 {"outcome": "error", "detail": "internal"}\` — ours; nothing else is
   ever in that body. Retry with the same key.
 
