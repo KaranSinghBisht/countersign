@@ -10,8 +10,8 @@ export const landingBody = `
 
   <div class="stats wrap">
     <div class="stats-row">
-      <div class="stat"><b>400</b> unit tests</div>
-      <div class="stat"><b>140</b> integration tests</div>
+      <div class="stat"><b>401</b> unit tests</div>
+      <div class="stat"><b>142</b> integration tests</div>
       <div class="stat"><b>30</b> offline checks</div>
       <div class="stat"><b>8</b> rehearsed failures</div>
       <div class="stat">exit <b>0</b></div>
@@ -199,7 +199,7 @@ export const landingBody = `
             <li>Merkle audit log with live export (make export)</li>
             <li>Offline verifier — 30 checks, pinned trust</li>
             <li>Discovery docs — /, /agents.md, /llms.txt</li>
-            <li>400 unit + 140 integration tests in CI</li>
+            <li>401 unit + 142 integration tests in CI</li>
             <li>Fourteen unhedged limitations, each with a named remedy</li>
           </ul>
         </div>

@@ -67,7 +67,7 @@ We score ourselves. The gaps stay in the table.
 | Pillar | Score | /Max | % | Band | Notes |
 |---|---:|---:|---:|---|---|
 | Context | 10 | 14 | 71% | Assisted | Root + nested `AGENTS.md`. No `repo-skill` corpus, no Slash-extracted knowledge docs. |
-| Testing | 22 | 30 | 73% | Assisted | 400 unit tests under `make check`; integration (webhook adversarial table, 20-vs-3 concurrency, recon, purchase→export→verify e2e) is a separate CI job. No browser E2E, no OpenAPI, no contract suite. |
+| Testing | 22 | 30 | 73% | Assisted | 401 unit tests under `make check`; integration (webhook adversarial table, 20-vs-3 concurrency, recon, purchase→export→verify e2e) is a separate CI job. No browser E2E, no OpenAPI, no contract suite. |
 | CI/CD | 7 | 14 | 50% | Needs Work | GitHub Actions: lint, types, unit, vector replay, secret scan on full history, integration against Postgres. No deploy, no agent-reviewer skill in CI. |
 | **Aggregate** | **39** | **58** | **67%** | **Assisted** | Below Ready. Published including the miss. |
 
