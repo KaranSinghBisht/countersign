@@ -6,7 +6,7 @@
  * not match the bytes.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AuditRecord } from "../audit/record.js";
 import { digestB64u } from "../crypto/digest.js";
@@ -23,8 +23,29 @@ export interface BundleInput {
   readonly createdAt?: string;
 }
 
+/** Everything a bundle may contain. Nothing else in `root` is touched. */
+const BUNDLE_ENTRIES = [
+  "records.jsonl",
+  "MANIFEST.json",
+  "checkpoints",
+  "mandates",
+  "checkouts",
+  "receipts",
+  "policy",
+] as const;
+
 export function writeBundle(root: string, input: BundleInput): void {
   mkdirSync(root, { recursive: true });
+
+  // A bundle is a complete statement: MANIFEST lists every evidence file and
+  // the loader refuses anything unlisted. A file left behind by an earlier
+  // export at a smaller tree size (checkpoints/4.note under a size-9 export)
+  // would make the merchant's own evidence unverifiable, so the known entries
+  // are cleared first — only those, never the directory itself, so a
+  // misconfigured root cannot take anything else with it.
+  for (const entry of BUNDLE_ENTRIES) {
+    rmSync(join(root, entry), { recursive: true, force: true });
+  }
 
   const files: Record<string, Uint8Array> = {};
 

@@ -53,6 +53,42 @@ describe("countersign CLI", () => {
     expect(result.stdout).toMatch(/VERIFIED/);
   });
 
+  // One spawn per test: three in a row can outrun the timeout on a loaded box.
+  it("explains a record by seq — the position every purchase response returns", async () => {
+    const keys = await generateSampleKeys();
+    const world = await signedWorld(keys);
+    const bundle = tmp("explain-seq");
+    writeHonestBundle(bundle, world);
+
+    const bySeq = run(["explain", "--bundle", bundle, "--seq", "0"]);
+    expect(bySeq.status).toBe(EXIT_OK);
+    expect(bySeq.stdout).toMatch(/^seq 0\n1 record\(s\)/);
+  });
+
+  it("explains a record by its derived receipt", async () => {
+    const keys = await generateSampleKeys();
+    const world = await signedWorld(keys);
+    const bundle = tmp("explain-receipt");
+    writeHonestBundle(bundle, world);
+
+    const first = JSON.parse(
+      readFileSync(join(bundle, "records.jsonl"), "utf8").split("\n")[0] as string,
+    ) as { tool: { args: { receipt: string } } };
+    const byReceipt = run(["explain", "--bundle", bundle, "--receipt", first.tool.args.receipt]);
+    expect(byReceipt.status).toBe(EXIT_OK);
+    expect(byReceipt.stdout).toMatch(/seq 0 /);
+  });
+
+  it("treats two explain selectors as malformed, not as a merge", async () => {
+    const keys = await generateSampleKeys();
+    const world = await signedWorld(keys);
+    const bundle = tmp("explain-two");
+    writeHonestBundle(bundle, world);
+
+    const both = run(["explain", "--bundle", bundle, "--seq", "0", "--order", "order_x"]);
+    expect(both.status).toBe(EXIT_MALFORMED);
+  });
+
   it("uses --trust, not a trust.json packed inside the bundle", async () => {
     const honest = await generateSampleKeys();
     const attacker = await generateSampleKeys();

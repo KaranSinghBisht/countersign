@@ -20,6 +20,7 @@ import { type AuditRecord, GENESIS_HASH, verifyRecordChain } from "../audit/reco
 import { assertCanonicalizable, type JsonValue } from "../crypto/canonical.js";
 import { digestJson } from "../crypto/digest.js";
 import { hex, hexDecode, utf8 } from "../crypto/encoding.js";
+import { CLOCK_SKEW_SECONDS } from "../mandate/types.js";
 import { type ChainSuccess, hashJws, verifyChain } from "../mandate/verify.js";
 import { CURRENCIES, type CurrencyCode, money } from "../money/money.js";
 import { decide, type SpendState } from "../policy/engine.js";
@@ -399,11 +400,19 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
       fail("E1", `derived receipt ${derived} is malformed`, record.seq);
     else pass("E1", derived);
 
+    // The same tolerance the server applied when it accepted the mandate
+    // (verifyChain: `now + skew < iat` / `now - skew >= exp`). A stricter
+    // window here would make the verifier reject purchases the server
+    // honestly admitted 20 seconds inside the skew — a verifier that
+    // disagrees with the code it imports is not replaying the decision.
     const ts = unix(record.ts);
-    if (ts < chainResult.closed.iat || ts > chainResult.closed.exp) {
+    if (
+      ts + CLOCK_SKEW_SECONDS < chainResult.closed.iat ||
+      ts - CLOCK_SKEW_SECONDS >= chainResult.closed.exp
+    ) {
       fail(
         "T1",
-        `record ts ${record.ts} is outside closed mandate [${chainResult.closed.iat}, ${chainResult.closed.exp}]`,
+        `record ts ${record.ts} is outside closed mandate [${chainResult.closed.iat}, ${chainResult.closed.exp}] beyond the ${CLOCK_SKEW_SECONDS}s skew`,
         record.seq,
       );
     } else {
@@ -574,9 +583,37 @@ function replayPolicy(
       `recorded ${record.decision}, decide() returned ${decision.effect} (${decision.decidedBy ?? "—"})`,
       record.seq,
     );
-  } else {
-    pass("P1", decision.decidedBy ?? "permit");
+    return;
   }
+
+  // The verdict alone is not the evidence — "every money action explainable"
+  // means the explanation is bound too. An operator holding the checkpoint
+  // key could otherwise re-narrate a record (a different rule list, a kinder
+  // reason) without moving the amount or the effect, and the log would still
+  // verify. Rules, first_deny and reason must all replay byte-for-byte.
+  const recordedRules = record.policy.rules_evaluated.map((r) => `${r.id}:${r.effect}`).join(",");
+  const replayedRules = decision.rules.map((r) => `${r.id}:${r.effect}`).join(",");
+  if (recordedRules !== replayedRules) {
+    fail(
+      "P1",
+      `rules_evaluated [${recordedRules || "none"}] ≠ replay [${replayedRules}]`,
+      record.seq,
+    );
+    return;
+  }
+  if (record.policy.first_deny !== decision.decidedBy) {
+    fail(
+      "P1",
+      `first_deny ${record.policy.first_deny ?? "null"} ≠ replay ${decision.decidedBy ?? "null"}`,
+      record.seq,
+    );
+    return;
+  }
+  if (record.reason !== decision.reason) {
+    fail("P1", `reason "${record.reason}" ≠ replay "${decision.reason}"`, record.seq);
+    return;
+  }
+  pass("P1", decision.decidedBy ?? "permit");
 }
 
 function vacuousBounds(

@@ -11,6 +11,7 @@ import { digestB64u, digestString } from "../crypto/digest.js";
 import { hex, utf8 } from "../crypto/encoding.js";
 import { sign } from "../crypto/jws.js";
 import { generateKey, type KeyPair } from "../crypto/keys.js";
+import { ConstraintSchema } from "../mandate/constraints.js";
 import {
   CLOSED_MANDATE_TYP,
   CLOSED_MANDATE_VCT,
@@ -18,6 +19,8 @@ import {
   OPEN_MANDATE_VCT,
 } from "../mandate/types.js";
 import { hashJws } from "../mandate/verify.js";
+import { money } from "../money/money.js";
+import { decide } from "../policy/engine.js";
 import { deriveReceipt } from "../razorpay/receipt.js";
 import { loadBundle } from "./bundle.js";
 import { CHECKS, verifyBundle } from "./checks.js";
@@ -139,6 +142,18 @@ async function signedWorld(opts?: {
   );
 
   const receipt = deriveReceipt(closedJti, requestHash);
+
+  // The honest ALLOW carries the engine's own narrative (P1 binds rules,
+  // first_deny and reason to a replay); the DENY / ESCALATE variants keep
+  // hand-authored values because they exist to be caught.
+  const replay = decide(
+    CONSTRAINTS.map((c) => ConstraintSchema.parse(c)),
+    { amount: money(1_499_000n, "INR"), payee: { id: "vnd_1042" }, rail: "razorpay_order" },
+    { spent: money(0n, "INR"), actions: 0, recent: [] },
+    NOW,
+  );
+  const honest = decision === "ALLOW";
+
   const draft: UnsealedRecord = {
     v: 1,
     seq: 0,
@@ -167,8 +182,10 @@ async function signedWorld(opts?: {
     policy: {
       bundle_sha256: DIGEST,
       engine_version: "0.3.1",
-      rules_evaluated: [{ id: "R-BUD-INR", constraint: "spend.budget", effect: "permit" }],
-      first_deny: firstDeny,
+      rules_evaluated: honest
+        ? replay.rules.map((r) => ({ id: r.id, constraint: r.constraint, effect: r.effect }))
+        : [{ id: "R-BUD-INR", constraint: "spend.budget", effect: "permit" }],
+      first_deny: honest ? replay.decidedBy : firstDeny,
     },
     accounting: {
       spent_before_paise: 0,
@@ -180,7 +197,7 @@ async function signedWorld(opts?: {
       currency: "INR",
     },
     decision,
-    reason: "within per-transaction cap and aggregate budget",
+    reason: honest ? replay.reason : "within per-transaction cap and aggregate budget",
     external: {
       rail: "razorpay",
       idempotency_key: "idem-1",

@@ -3,7 +3,7 @@
  *
  *   countersign verify --bundle ./export --trust ./trust.json
  *   countersign verify-receipt --receipt ./r.json --trust ./trust.json
- *   countersign explain --bundle ./export --order order_...
+ *   countersign explain --bundle ./export --seq 4211
  *
  * Exit codes: 0 verified, 1 check failed, 2 malformed bundle, 3 trust error.
  * The verifier never reads a key out of the bundle.
@@ -11,7 +11,7 @@
 
 import { BundleError, loadBundle } from "../verify/bundle.js";
 import { verifyBundle } from "../verify/checks.js";
-import { explainOrder } from "../verify/explain.js";
+import { type ExplainSelector, explain } from "../verify/explain.js";
 import { verifyReceiptFile } from "../verify/receipt.js";
 import {
   EXIT_FAILED,
@@ -29,7 +29,10 @@ function usage(): string {
 Usage:
   countersign verify          --bundle <dir|tar.gz> --trust <trust.json> [--json]
   countersign verify-receipt  --receipt <file>      --trust <trust.json> [--json]
-  countersign explain         --bundle <dir|tar.gz> --order <order_id>
+  countersign explain         --bundle <dir|tar.gz> --seq <n>
+                              (or --receipt <receipt> | --closed <jti> | --order <order_id>)
+
+  --seq is the position every POST /purchase response returns as audit.seq.
 
 Exit codes:
   0  verified
@@ -45,6 +48,24 @@ function flag(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(name);
   if (index === -1) return undefined;
   return args[index + 1];
+}
+
+/** Exactly one selector, or nothing — two selectors is a malformed request, not a merge. */
+function explainSelector(args: readonly string[]): ExplainSelector | undefined {
+  const seq = flag(args, "--seq");
+  const receipt = flag(args, "--receipt");
+  const closed = flag(args, "--closed");
+  const order = flag(args, "--order");
+  const given = [seq, receipt, closed, order].filter((v) => v !== undefined);
+  if (given.length !== 1) return undefined;
+
+  if (seq !== undefined) {
+    const n = Number(seq);
+    return Number.isInteger(n) && n >= 0 ? { seq: n } : undefined;
+  }
+  if (receipt !== undefined) return { receipt };
+  if (closed !== undefined) return { closedJti: closed };
+  return order === undefined ? undefined : { order };
 }
 
 function die(code: number, message: string): never {
@@ -102,14 +123,17 @@ async function main(argv: readonly string[]): Promise<void> {
 
     if (command === "explain") {
       const bundlePath = flag(rest, "--bundle");
-      const orderId = flag(rest, "--order");
-      if (bundlePath === undefined || orderId === undefined) {
-        die(EXIT_MALFORMED, "explain requires --bundle and --order");
+      const selector = explainSelector(rest);
+      if (bundlePath === undefined || selector === undefined) {
+        die(
+          EXIT_MALFORMED,
+          "explain requires --bundle and exactly one of --seq, --receipt, --closed, --order",
+        );
       }
 
       const bundle = loadBundle(bundlePath);
-      const text = explainOrder(bundle, orderId);
-      if (text === undefined) die(EXIT_FAILED, `no records for order ${orderId}`);
+      const text = explain(bundle, selector);
+      if (text === undefined) die(EXIT_FAILED, `no records match ${JSON.stringify(selector)}`);
       process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
       process.exit(EXIT_OK);
     }

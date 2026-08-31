@@ -16,11 +16,11 @@ import type { JsonValue } from "../crypto/canonical.js";
 import { canonicalBytes } from "../crypto/canonical.js";
 import { digestB64u } from "../crypto/digest.js";
 import { hex } from "../crypto/encoding.js";
-import type { Sql } from "../db/client.js";
+import type { Sql, TransactionSql } from "../db/client.js";
 import { deriveReceipt } from "../razorpay/receipt.js";
 import type { CheckoutFile, ReceiptFile } from "../verify/bundle.js";
 import { writeBundle } from "../verify/export.js";
-import { allCheckpoints, latestCheckpoint, proveInclusion, read } from "./log.js";
+import { allCheckpoints, latestCheckpoint, proveInclusionMany, read } from "./log.js";
 import type { AuditRecord } from "./record.js";
 
 export interface LiveExportResult {
@@ -29,7 +29,17 @@ export interface LiveExportResult {
   readonly treeSize: number;
 }
 
+/**
+ * The export reads inside ONE repeatable-read transaction. A bundle is a
+ * statement about a single state of the log; assembled from a sequence of
+ * independent reads while a purchase commits, it could carry a checkpoint
+ * from one generation and a record from the next, and verify against neither.
+ */
 export async function exportLiveBundle(sql: Sql, dir: string): Promise<LiveExportResult> {
+  return sql.begin("isolation level repeatable read read only", (tx) => exportWithin(tx, dir));
+}
+
+async function exportWithin(sql: TransactionSql, dir: string): Promise<LiveExportResult> {
   const latest = await latestCheckpoint(sql);
   if (latest === undefined) {
     throw new Error(
@@ -54,6 +64,13 @@ export async function exportLiveBundle(sql: Sql, dir: string): Promise<LiveExpor
   const mandates: Record<string, string> = {};
   const checkouts: Record<string, CheckoutFile> = {};
   const receipts: Record<string, ReceiptFile> = {};
+
+  // Every proof from one read of the leaves — not one full read per record.
+  const evidenceBySeq = await proveInclusionMany(
+    sql,
+    records.filter((r) => r.decision === "ALLOW").map((r) => r.seq),
+    treeSize,
+  );
 
   for (const record of records) {
     const artifact = (
@@ -99,7 +116,8 @@ export async function exportLiveBundle(sql: Sql, dir: string): Promise<LiveExpor
 			`
     )[0];
 
-    const evidence = await proveInclusion(sql, record.seq, treeSize);
+    const evidence = evidenceBySeq.get(record.seq);
+    if (evidence === undefined) throw new Error(`no inclusion evidence for seq ${record.seq}`);
     receipts[receipt] = {
       receipt,
       closed_jti: record.mandate.closed_jti,

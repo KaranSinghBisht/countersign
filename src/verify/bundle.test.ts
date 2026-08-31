@@ -1,10 +1,30 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { digestB64u } from "../crypto/digest.js";
 import { utf8 } from "../crypto/encoding.js";
 import { assertSafeTarMember, BundleError, loadBundle } from "./bundle.js";
+import { writeBundle } from "./export.js";
+
+describe("writeBundle", () => {
+  it("clears evidence left by an earlier export so MANIFEST stays complete", () => {
+    const dir = mkdtempSync(join(tmpdir(), "countersign-reexport-"));
+    const base = { records: [], mandates: {}, checkouts: {}, receipts: {} };
+
+    // First export sealed at size 2, second at size 1: the 2.note must go,
+    // or the loader rejects the bundle as carrying an unlisted file.
+    writeBundle(dir, { ...base, checkpoints: { 2: "note-two\n" } });
+    writeBundle(dir, { ...base, checkpoints: { 1: "note-one\n" } });
+
+    expect(existsSync(join(dir, "checkpoints", "2.note"))).toBe(false);
+    expect(existsSync(join(dir, "checkpoints", "1.note"))).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(dir, "MANIFEST.json"), "utf8")) as {
+      files: Record<string, string>;
+    };
+    expect(Object.keys(manifest.files).sort()).toEqual(["checkpoints/1.note", "records.jsonl"]);
+  });
+});
 
 describe("bundle path guards", () => {
   it("refuses tar members that escape the dest dir", () => {

@@ -16,7 +16,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -108,20 +108,26 @@ export interface LoadedBundle {
 }
 
 export function loadBundle(path: string): LoadedBundle {
-  const root = expand(path);
-  const manifest = readManifest(root);
-  assertManifest(root, manifest);
+  const { root, tempDir } = expand(path);
+  try {
+    const manifest = readManifest(root);
+    assertManifest(root, manifest);
 
-  return {
-    root,
-    manifest,
-    records: readRecords(root),
-    checkpoints: readNotes(join(root, "checkpoints")),
-    mandates: readTextDir(join(root, "mandates"), ".jws"),
-    checkouts: readJsonDir(join(root, "checkouts"), CheckoutSchema),
-    receipts: readJsonDir(join(root, "receipts"), ReceiptSchema),
-    policy: optionalJson(join(root, "policy", "engine.json"), PolicyFileSchema),
-  };
+    // Everything is read eagerly, so an archive's extraction is disposable
+    // the moment this returns — nothing below holds a path into it.
+    return {
+      root,
+      manifest,
+      records: readRecords(root),
+      checkpoints: readNotes(join(root, "checkpoints")),
+      mandates: readTextDir(join(root, "mandates"), ".jws"),
+      checkouts: readJsonDir(join(root, "checkouts"), CheckoutSchema),
+      receipts: readJsonDir(join(root, "receipts"), ReceiptSchema),
+      policy: optionalJson(join(root, "policy", "engine.json"), PolicyFileSchema),
+    };
+  } finally {
+    if (tempDir !== undefined) rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 /** An evidence bundle is a few hundred small files; 10k entries is hostile. */
@@ -130,10 +136,11 @@ const MAX_BUNDLE_ENTRIES = 10_000;
 /** Cap on DECOMPRESSED bytes, so a kilobyte bomb cannot fill the disk. */
 const MAX_BUNDLE_BYTES = 512 * 1024 * 1024;
 
-function expand(path: string): string {
+/** A directory is used in place; an archive is extracted into a temp dir the caller must remove. */
+function expand(path: string): { root: string; tempDir: string | undefined } {
   if (!statExists(path)) throw new BundleError(`bundle not found: ${path}`);
 
-  if (statSync(path).isDirectory()) return path;
+  if (statSync(path).isDirectory()) return { root: path, tempDir: undefined };
 
   if (!/\.(tar\.gz|tgz)$/.test(path)) {
     throw new BundleError(`bundle must be a directory or a .tar.gz, got ${path}`);
@@ -188,6 +195,10 @@ function expand(path: string): string {
     );
     assertNoSymlinks(dest);
   } catch (error) {
+    // A refused archive must not leave its partial extraction behind: a
+    // decompression bomb that dies at the 512 MB cap would otherwise leave
+    // up to 512 MB in the auditor's temp dir per attempt.
+    rmSync(dest, { recursive: true, force: true });
     if (error instanceof BundleError) throw error;
     throw new BundleError(`failed to unpack ${path}: ${(error as Error).message}`);
   }
@@ -195,9 +206,10 @@ function expand(path: string): string {
   const entries = readdirSync(dest);
   if (entries.length === 1) {
     const nested = join(dest, entries[0] as string);
-    if (statExists(nested) && statSync(nested).isDirectory()) return nested;
+    if (statExists(nested) && statSync(nested).isDirectory())
+      return { root: nested, tempDir: dest };
   }
-  return dest;
+  return { root: dest, tempDir: dest };
 }
 
 function readManifest(root: string): Manifest {

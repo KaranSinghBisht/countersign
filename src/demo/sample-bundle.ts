@@ -16,6 +16,7 @@ import { digestB64u, digestString } from "../crypto/digest.js";
 import { hex, utf8 } from "../crypto/encoding.js";
 import { sign } from "../crypto/jws.js";
 import { generateKey, type KeyPair } from "../crypto/keys.js";
+import { ConstraintSchema } from "../mandate/constraints.js";
 import {
   CLOSED_MANDATE_TYP,
   CLOSED_MANDATE_VCT,
@@ -23,6 +24,8 @@ import {
   OPEN_MANDATE_VCT,
 } from "../mandate/types.js";
 import { hashJws } from "../mandate/verify.js";
+import { money } from "../money/money.js";
+import { decide } from "../policy/engine.js";
 import { deriveReceipt } from "../razorpay/receipt.js";
 import type { CheckoutFile, ReceiptFile } from "../verify/bundle.js";
 import { writeBundle } from "../verify/export.js";
@@ -140,6 +143,19 @@ export async function signedWorld(keys: SampleKeys): Promise<SampleWorld> {
   );
 
   const receipt = deriveReceipt(closedJti, requestHash);
+
+  // The narrative comes from the engine, never from a hand-written string:
+  // P1 replays decide() and binds rules, first_deny and reason, so a fixture
+  // that authored its own explanation would fail its own verifier.
+  const decision = decide(
+    // Parsed through the same schema the verifier applies to the open
+    // mandate, so bounds arrive as bigint minor units, exactly as replayed.
+    CONSTRAINTS.map((c) => ConstraintSchema.parse(c)),
+    { amount: money(1_499_000n, "INR"), payee: { id: "vnd_1042" }, rail: "razorpay_order" },
+    { spent: money(0n, "INR"), actions: 0, recent: [] },
+    NOW,
+  );
+
   const draft: UnsealedRecord = {
     v: 1,
     seq: 0,
@@ -168,8 +184,12 @@ export async function signedWorld(keys: SampleKeys): Promise<SampleWorld> {
     policy: {
       bundle_sha256: DIGEST,
       engine_version: "0.3.1",
-      rules_evaluated: [{ id: "R-BUD-INR", constraint: "spend.budget", effect: "permit" }],
-      first_deny: null,
+      rules_evaluated: decision.rules.map((r) => ({
+        id: r.id,
+        constraint: r.constraint,
+        effect: r.effect,
+      })),
+      first_deny: decision.decidedBy,
     },
     accounting: {
       spent_before_paise: 0,
@@ -181,7 +201,7 @@ export async function signedWorld(keys: SampleKeys): Promise<SampleWorld> {
       currency: "INR",
     },
     decision: "ALLOW",
-    reason: "within per-transaction cap and aggregate budget",
+    reason: decision.reason,
     external: {
       rail: "razorpay",
       idempotency_key: "idem-1",
@@ -248,9 +268,9 @@ export async function signedWorld(keys: SampleKeys): Promise<SampleWorld> {
   };
 }
 
-export function writeTrustFile(dir: string, keys: SampleKeys): string {
+export function writeTrustFile(dir: string, keys: SampleKeys, name = "trust.json"): string {
   mkdirSync(dir, { recursive: true });
-  const path = join(dir, "trust.json");
+  const path = join(dir, name);
   writeFileSync(
     path,
     `${JSON.stringify(
@@ -291,5 +311,8 @@ export async function writeDemoExport(root: string): Promise<{ bundle: string; t
   const world = await signedWorld(keys);
   const bundle = join(root, "export");
   writeHonestBundle(bundle, world);
-  return { bundle, trust: writeTrustFile(root, keys) };
+  // Named apart from the server's ./trust.json on purpose: the demo pair and
+  // the server pair verify different bundles, and a near-identical filename
+  // turned a wrong pairing into something that looked like tampering.
+  return { bundle, trust: writeTrustFile(root, keys, "trust.demo.json") };
 }
