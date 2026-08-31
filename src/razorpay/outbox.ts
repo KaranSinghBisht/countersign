@@ -78,7 +78,16 @@ export async function claim(
 		       updated_at = now()
 		 WHERE id = (
 			SELECT id FROM outbox
-			 WHERE state IN ('pending', 'in_doubt')
+			 WHERE (
+				state IN ('pending', 'in_doubt')
+				-- A worker that died mid-tick (every PaaS deploy) leaves its
+				-- message in_flight. Once the lease lapses it is ours again;
+				-- without this clause nothing ever reclaims it and the buyer
+				-- holds a 200 for an order that is never created. Replaying a
+				-- create_order is safe by construction: the receipt is derived,
+				-- so Razorpay rejects the duplicate and we look ours up.
+				OR (state = 'in_flight' AND lease_expires_at <= now())
+			   )
 			   AND NOT (kind = 'create_order' AND state = 'in_doubt')
 			   AND next_attempt_at <= now()
 			   AND (lease_expires_at IS NULL OR lease_expires_at <= now())
@@ -162,6 +171,21 @@ export async function retry(sql: Sql, id: string, attempts: number, error: strin
 		       updated_at = now()
 		 WHERE id = ${id}
 	`;
+}
+
+/**
+ * Drop finished messages past retention. A done row carries the result of a
+ * call whose effect is already recorded on the payment row and in the ledger;
+ * keeping it for the retry horizon is useful, keeping it forever is a leak.
+ */
+export async function purgeDone(sql: Sql, retentionDays = 7): Promise<number> {
+  const removed = await sql`
+		DELETE FROM outbox
+		 WHERE state = 'done'
+		   AND updated_at <= now() - make_interval(days => ${retentionDays})
+		RETURNING id
+	`;
+  return removed.length;
 }
 
 export async function ofStream(sql: Sql, stream: string): Promise<Claimed[]> {

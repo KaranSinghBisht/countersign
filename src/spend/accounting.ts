@@ -10,8 +10,10 @@
  * reproduces the balance, and the whole verifiability claim collapses. Either
  * all of it happened or none of it did.
  *
- * The serialization point is a `SELECT ... FOR UPDATE` on the mandate's spend
- * row. Twenty concurrent requests against a budget with room for three must
+ * The serialization point is one `INSERT … ON CONFLICT DO UPDATE … RETURNING`
+ * on the mandate's spend row, which creates-or-locks the row in a single
+ * statement (the two-step `SELECT … FOR UPDATE` version deadlocks — see below).
+ * Twenty concurrent requests against a budget with room for three must
  * produce exactly three successes, and they do because nineteen of them wait
  * on that lock and re-read the balance after the winner commits. Reading the
  * balance outside a lock and then checking it is the textbook version of this
@@ -19,7 +21,13 @@
  * is room.
  */
 
-import { isUniqueViolation, type Sql, type TransactionSql, withTxn } from "../db/client.js";
+import {
+  constraintOf,
+  isUniqueViolation,
+  type Sql,
+  type TransactionSql,
+  withTxn,
+} from "../db/client.js";
 import { holdPostings, post } from "../ledger/ledger.js";
 import type { Constraint } from "../mandate/constraints.js";
 import { type CurrencyCode, type Money, money } from "../money/money.js";
@@ -141,13 +149,23 @@ export async function attemptSpend(
 
     if (replayed) return { outcome: "replayed", closedJti: input.closedJti } as const;
 
-    const recent = await tx<{ occurred_at: Date; amount_minor: bigint; currency: CurrencyCode }[]>`
-			SELECT occurred_at, amount_minor, currency
-			  FROM mandate_actions
-			 WHERE open_jti = ${input.openJti}
-			 ORDER BY occurred_at DESC
-			 LIMIT 1000
-		`;
+    // Only the velocity rules read history, and only inside their window. A
+    // fixed LIMIT would undercount a busy mandate — and therefore over-permit
+    // it — exactly when the rule matters most.
+    const windowSeconds = input.constraints.reduce(
+      (max, c) => (c.type === "spend.velocity" ? Math.max(max, Number(c.window_seconds)) : max),
+      0,
+    );
+    const recent =
+      windowSeconds === 0
+        ? []
+        : await tx<{ occurred_at: Date; amount_minor: bigint; currency: CurrencyCode }[]>`
+				SELECT occurred_at, amount_minor, currency
+				  FROM mandate_actions
+				 WHERE open_jti = ${input.openJti}
+				   AND occurred_at >= to_timestamp(${input.now}) - make_interval(secs => ${windowSeconds})
+				 ORDER BY occurred_at DESC
+			`;
 
     const state: SpendState = {
       spent: money(row.spent_minor, row.currency),
@@ -196,7 +214,13 @@ export async function attemptSpend(
 				`;
       });
     } catch (error) {
-      if (isUniqueViolation(error)) {
+      // Only the one-in-flight index means contention. The table has two
+      // other unique constraints (the id, the closed_jti); a violation of
+      // those is a bug to surface, not a queue to wait in.
+      if (
+        isUniqueViolation(error) &&
+        constraintOf(error) === "one_outstanding_authorization_per_mandate"
+      ) {
         // The partial unique index on (open_jti) WHERE state='authorized'
         // is AP2's one-in-flight rule. Nothing was authorised, so the
         // closed mandate has not been spent — drop the replay guard we

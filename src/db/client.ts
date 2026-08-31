@@ -78,6 +78,16 @@ export const isCheckViolation = (error: unknown): boolean => pgCode(error) === "
 /** Is this a foreign-key violation, such as an entry naming an unknown account? */
 export const isForeignKeyViolation = (error: unknown): boolean => pgCode(error) === "23503";
 
+/**
+ * The constraint a violation names, when the driver reports one. A table with
+ * three unique constraints cannot classify a 23505 by code alone.
+ */
+export function constraintOf(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const name = (error as { constraint_name?: unknown }).constraint_name;
+  return typeof name === "string" ? name : undefined;
+}
+
 function pgCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const code = (error as { code?: unknown }).code;

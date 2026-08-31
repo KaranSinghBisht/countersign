@@ -6,6 +6,7 @@
  * an order that landed after we gave up — without a network.
  */
 
+import { randomBytes } from "node:crypto";
 import {
   type CreateOrderInput,
   type Razorpay,
@@ -30,6 +31,10 @@ export function fakeRazorpay(): FakeRazorpay {
   const orders = new Map<string, RazorpayOrder>();
   const payments = new Map<string, RazorpayPayment>();
 
+  // Ids are unique across processes, not just within one: a persistent dev
+  // database keeps yesterday's order_fake_1, and payments.order_id is
+  // unique, so a counter restarting at 1 would wedge the worker.
+  const instance = randomBytes(3).toString("hex");
   let orderSeq = 0;
   let createTimeout: "drop" | "land" | undefined;
   let captureTimeout = false;
@@ -44,7 +49,7 @@ export function fakeRazorpay(): FakeRazorpay {
 
     orderSeq += 1;
     const order: RazorpayOrder = {
-      id: `order_fake_${orderSeq}`,
+      id: `order_fake_${instance}_${orderSeq}`,
       amountMinor: input.amountMinor,
       currency: input.currency,
       receipt: input.receipt,

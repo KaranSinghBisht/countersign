@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Sql, TransactionSql } from "../db/client.js";
 import { isUniqueViolation } from "../db/client.js";
+import { captureAuthorized } from "./capture.js";
 import { applyRemoteState } from "./settle.js";
 import { verifyWebhookSignature } from "./signature.js";
 import { advance, isContradictory, isPaymentState, type PaymentState } from "./state.js";
@@ -200,6 +201,22 @@ export interface ProcessedEvent {
  * transaction so one poisonous event cannot block the rest, and an event that
  * changes nothing is still marked processed — otherwise it is retried forever.
  */
+/**
+ * Drop raw event bodies past retention. The signature was verified on
+ * arrival and the state change is on the payment row; the body's only later
+ * use is dedupe, and the 26-hour staleness window already bounds how late a
+ * replay can arrive — so a week is generous.
+ */
+export async function purgeProcessedEvents(sql: Sql, retentionDays = 7): Promise<number> {
+  const removed = await sql`
+		DELETE FROM webhook_events
+		 WHERE processed_at IS NOT NULL
+		   AND processed_at <= now() - make_interval(days => ${retentionDays})
+		RETURNING event_id
+	`;
+  return removed.length;
+}
+
 export async function processPending(sql: Sql, limit = 100): Promise<ProcessedEvent[]> {
   const pending = await sql<
     { event_id: string; event: string; payment_id: string | null; order_id: string | null }[]
@@ -304,6 +321,14 @@ async function processOne(sql: Sql | TransactionSql, row: PendingRow): Promise<P
   const transition = advance(before.state, target);
   const contradictory = isContradictory(before.state, target);
 
+  // Orders are created without auto-capture. An authorised payment that
+  // nobody captures is refunded by Razorpay after five days, so the capture
+  // is queued the moment we hear of the authorisation. Idempotent by payment
+  // id: the payer page's callback may already have queued it.
+  if (result.applied && result.next === "authorized") {
+    await captureAuthorized(sql, orderId, paymentId);
+  }
+
   if (!result.applied) {
     // `advance` would happily report "created → refunded" for the refused
     // contradictory pair, which reads as if it were applied. Say what
@@ -340,10 +365,20 @@ async function unmatched(
   row: { event_id: string; payment_id: string | null },
   settle: (applied: boolean, outcome: string) => Promise<ProcessedEvent>,
 ): Promise<ProcessedEvent> {
+  // The race is only credible while the create_order message that would
+  // fill in order_id is still alive in the outbox. A payment whose message
+  // failed or was purged is stranded, and stranded rows must not make every
+  // stranger event wait an hour behind them.
   const inflight = await sql`
-		SELECT 1 FROM payments
-		 WHERE order_id IS NULL
-		   AND state IN ('created', 'authorized')
+		SELECT 1 FROM payments p
+		 WHERE p.order_id IS NULL
+		   AND p.state IN ('created', 'authorized')
+		   AND EXISTS (
+		     SELECT 1 FROM outbox o
+		      WHERE o.stream = p.receipt
+		        AND o.kind = 'create_order'
+		        AND o.state IN ('pending', 'in_flight', 'in_doubt')
+		   )
 		 LIMIT 1
 	`;
   if (inflight.length > 0) {

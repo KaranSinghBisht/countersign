@@ -4,7 +4,12 @@ import type { Sql } from "../../src/db/client.js";
 import { ensureAccounts } from "../../src/ledger/ledger.js";
 import { deriveReceipt } from "../../src/razorpay/receipt.js";
 import { signAsRazorpay } from "../../src/razorpay/signature.js";
-import { ingest, processPending, STALENESS_WINDOW_SECONDS } from "../../src/razorpay/webhook.js";
+import {
+  ingest,
+  processPending,
+  purgeProcessedEvents,
+  STALENESS_WINDOW_SECONDS,
+} from "../../src/razorpay/webhook.js";
 import { migrateOnce, testDb, testId, truncateAll } from "./helpers.js";
 
 let sql: Sql;
@@ -368,15 +373,34 @@ describe("applying events", () => {
     expect(processed?.outcome).toContain("no local payment");
   });
 
-  it("does not poison an event that arrived before we stored the order id", async () => {
+  async function seedOrderless(outboxState: "pending" | "failed") {
+    const receipt = deriveReceipt(testId(), "R9dS1SLLLZQzHVeYm8dQ8Zc9Zc1kxZq2wPQKmxDxzZ8");
     await sql`
       INSERT INTO payments (receipt, authorization_id, open_jti, closed_jti, amount_minor, currency, state)
-      VALUES (
-        ${deriveReceipt(testId(), "R9dS1SLLLZQzHVeYm8dQ8Zc9Zc1kxZq2wPQKmxDxzZ8")},
-        ${testId()}, ${testId()}, ${testId()},
-        10000, 'INR', 'created'
-      )
+      VALUES (${receipt}, ${testId()}, ${testId()}, ${testId()}, 10000, 'INR', 'created')
     `;
+    // The create_order message intendPayment enqueued for this receipt is
+    // what would fill in order_id; its state decides whether a miss is a race.
+    await sql`
+      INSERT INTO outbox (id, kind, stream, payload, state)
+      VALUES (${testId()}, 'create_order', ${receipt}, '{}'::jsonb, ${outboxState})
+    `;
+  }
+
+  it("does not wait for a stranded payment whose create_order already failed", async () => {
+    await seedOrderless("failed");
+    await deliver(envelope("payment.captured"), "evt_stranded");
+
+    const [processed] = await processPending(sql);
+
+    expect(processed?.applied).toBe(false);
+    expect(processed?.outcome).toContain("no local payment");
+    expect(processed?.outcome).not.toMatch(/waiting/);
+    expect(await processPending(sql)).toHaveLength(0);
+  });
+
+  it("does not poison an event that arrived before we stored the order id", async () => {
+    await seedOrderless("pending");
     await deliver(envelope("payment.captured"), "evt_race");
 
     const [first] = await processPending(sql);
@@ -426,5 +450,44 @@ describe("applying events", () => {
 
     expect(processed).toHaveLength(2);
     expect(await stateOf()).toBe("captured");
+  });
+});
+
+describe("webhook retention", () => {
+  it("purges processed events past the retention window, never pending ones", async () => {
+    await seedPayment("created");
+    await deliver(envelope("payment.captured"), "evt_old");
+    // A different body, or the digest dedupe would fold it into evt_old.
+    await deliver(envelope("payment.captured", { created_at: NOW - 11 }), "evt_pending");
+    await sql`
+      UPDATE webhook_events SET processed_at = now() - interval '8 days' WHERE event_id = 'evt_old'
+    `;
+
+    expect(await purgeProcessedEvents(sql)).toBe(1);
+
+    const left = await sql<{ event_id: string }[]>`SELECT event_id FROM webhook_events`;
+    expect(left.map((r) => r.event_id)).toEqual(["evt_pending"]);
+  });
+});
+
+describe("capture after authorization", () => {
+  it("queues exactly one capture when Razorpay authorises a payment on our order", async () => {
+    await seedPayment("created");
+    await deliver(envelope("payment.authorized"), "evt_auth");
+    const [first] = await processPending(sql);
+    expect(first?.applied).toBe(true);
+    expect(await stateOf()).toBe("authorized");
+
+    const queued = await sql<{ id: string; kind: string; state: string }[]>`
+      SELECT id, kind, state FROM outbox
+    `;
+    expect(queued).toEqual([
+      { id: `capture:${PAYMENT_ID}`, kind: "capture_payment", state: "pending" },
+    ]);
+
+    // Razorpay redelivers; the payer page may also have reported it. One capture.
+    await deliver(envelope("payment.authorized", { created_at: NOW - 11 }), "evt_auth_again");
+    await processPending(sql);
+    expect(await sql`SELECT 1 FROM outbox`).toHaveLength(1);
   });
 });

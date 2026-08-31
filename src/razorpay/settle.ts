@@ -19,6 +19,7 @@ import {
   RazorpayTimeout,
 } from "./client.js";
 import {
+  type Claimed,
   claim,
   complete,
   type EnqueueInput,
@@ -170,11 +171,14 @@ export async function drainOne(sql: Sql, razorpay: Razorpay): Promise<DrainResul
 
     if (error instanceof RazorpayApiError && error.status >= 400 && error.status < 500) {
       await fail(sql, claimed.id, error.message);
+      await abandonIfCreate(sql, claimed, error.message);
       return { id: claimed.id, kind: claimed.kind, outcome: "failed", detail: error.message };
     }
 
     if (claimed.attempts >= MAX_ATTEMPTS) {
-      await fail(sql, claimed.id, error instanceof Error ? error.message : "exhausted retries");
+      const reason = error instanceof Error ? error.message : "exhausted retries";
+      await fail(sql, claimed.id, reason);
+      await abandonIfCreate(sql, claimed, reason);
       return { id: claimed.id, kind: claimed.kind, outcome: "failed", detail: "exhausted retries" };
     }
 
@@ -318,6 +322,65 @@ async function flagPayment(sql: Sql, receipt: string, reason: string): Promise<v
 		)
 		ON CONFLICT (id) DO NOTHING
 	`;
+}
+
+async function abandonIfCreate(sql: Sql, claimed: Claimed, reason: string): Promise<void> {
+  if (claimed.kind !== "create_order") return;
+  await abandonIntent(sql, receiptOf(claimed.payload), reason);
+}
+
+/**
+ * Razorpay refused to create the order, or we stopped trying. No money
+ * moved and none will: the payment is failed, the hold is released in the
+ * ledger, and the authorization leaves the `authorized` state that AP2's
+ * one-in-flight index counts. Without this, one refused order — wrong API
+ * keys are enough — would cap the mandate at a single purchase for ever.
+ *
+ * The mandate's spend counter keeps the amount. A refused order still
+ * counted as an action against the budget the human signed; giving it back
+ * automatically would let a run of refusals be retried without limit. That
+ * is the fail-closed direction, and a human reconciles the difference.
+ *
+ * A timeout never comes here: the create MAY have landed, so the payment is
+ * flagged in doubt and a lookup is queued instead.
+ */
+export async function abandonIntent(sql: Sql, receipt: string, reason: string): Promise<void> {
+  await withTxn(sql, async (tx) => {
+    const rows = await tx<
+      { authorization_id: string; amount_minor: bigint; currency: CurrencyCode }[]
+    >`
+			UPDATE payments
+			   SET state = 'failed',
+			       in_doubt = FALSE,
+			       in_doubt_reason = ${reason},
+			       updated_at = now()
+			 WHERE receipt = ${receipt}
+			   AND state = 'created'
+			   AND order_id IS NULL
+			RETURNING authorization_id, amount_minor, currency
+		`;
+    const row = rows[0];
+    if (row === undefined) return;
+
+    try {
+      await post(tx, {
+        id: `${row.authorization_id}:release`,
+        kind: "release",
+        memo: `release: ${reason}`,
+        externalRef: receipt,
+        postings: releasePostings(money(row.amount_minor, row.currency)),
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+
+    await tx`
+			UPDATE authorizations
+			   SET state = 'failed', updated_at = now()
+			 WHERE id = ${row.authorization_id}
+			   AND state = 'authorized'
+		`;
+  });
 }
 
 /**

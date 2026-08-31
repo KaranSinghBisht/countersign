@@ -214,6 +214,50 @@ describe("the outbox worker", () => {
     expect(await drainOne(sql, razorpay)).toBeUndefined();
   });
 
+  it("frees the mandate's one-in-flight slot when Razorpay refuses the order", async () => {
+    // Wrong API keys are enough to make every create a 401. Before this,
+    // the authorization stayed `authorized` for ever and the partial unique
+    // index capped the open mandate at exactly one purchase.
+    const razorpay = fakeRazorpay();
+    razorpay.failNextCreate(401, "Authentication failed");
+    const openJti = testId();
+    const authorizationId = testId();
+    const closedJti = testId();
+    await sql`
+      INSERT INTO authorizations (id, open_jti, closed_jti, state, amount_minor, currency)
+      VALUES (${authorizationId}, ${openJti}, ${closedJti}, 'authorized', ${AMOUNT}, ${INR})
+    `;
+    const { receipt } = await sql.begin((tx) =>
+      intendPayment(tx, {
+        authorizationId,
+        openJti,
+        closedJti,
+        requestHash: HASH,
+        amountMinor: AMOUNT,
+        currency: INR,
+        outboxId: testId(),
+      }),
+    );
+
+    expect(await drainOne(sql, razorpay)).toMatchObject({ outcome: "failed" });
+
+    expect(await paymentOf(receipt)).toMatchObject({ state: "failed", order_id: null });
+    const [authorization] = await sql<{ state: string }[]>`
+      SELECT state FROM authorizations WHERE id = ${authorizationId}
+    `;
+    expect(authorization?.state).toBe("failed");
+    expect(
+      await sql`SELECT 1 FROM ledger_transactions WHERE id = ${`${authorizationId}:release`}`,
+    ).toHaveLength(1);
+
+    // The slot is free: a second authorization under the same open mandate
+    // is accepted by the one-in-flight index.
+    await sql`
+      INSERT INTO authorizations (id, open_jti, closed_jti, state, amount_minor, currency)
+      VALUES (${testId()}, ${openJti}, ${testId()}, 'authorized', ${AMOUNT}, ${INR})
+    `;
+  });
+
   it("drains the queue", async () => {
     const razorpay = fakeRazorpay();
     await intend();

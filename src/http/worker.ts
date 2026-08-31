@@ -8,8 +8,9 @@ import { latestCheckpoint, publishCheckpoint, size } from "../audit/log.js";
 import type { KeyPair } from "../crypto/keys.js";
 import type { Sql } from "../db/client.js";
 import type { Razorpay } from "../razorpay/client.js";
+import { purgeDone } from "../razorpay/outbox.js";
 import { drain } from "../razorpay/settle.js";
-import { processPending } from "../razorpay/webhook.js";
+import { processPending, purgeProcessedEvents } from "../razorpay/webhook.js";
 import { purgeExpired } from "../spend/nonce.js";
 import type { Logger } from "../telemetry/logger.js";
 import { purgeSettled, reapExpiredLeases } from "./idempotency.js";
@@ -36,17 +37,33 @@ export function startWorkers(
   razorpay: Razorpay,
   log: Logger,
   options: WorkerOptions = {},
-): () => void {
+): () => Promise<void> {
   const intervalMs = options.intervalMs ?? 2_000;
   let stopped = false;
   let running = false;
   let ticks = 0;
+  let current: Promise<void> = Promise.resolve();
 
   const tick = async (): Promise<void> => {
     if (stopped || running) return;
     running = true;
     try {
-      await drain(sql, razorpay);
+      // A message that ends failed or in doubt is a payment that will not
+      // settle on its own. Seventy-four refused orders once produced zero
+      // log lines; an operator has to be able to see this happen.
+      for (const result of await drain(sql, razorpay)) {
+        if (result.outcome === "failed" || result.outcome === "in_doubt") {
+          log.warn(
+            {
+              outbox_id: result.id,
+              kind: result.kind,
+              outcome: result.outcome,
+              detail: result.detail,
+            },
+            "outbox message did not settle",
+          );
+        }
+      }
       await processPending(sql);
       if (options.checkpoint !== undefined) {
         await publishIfGrown(sql, options.checkpoint, log);
@@ -58,24 +75,44 @@ export function startWorkers(
         const nonces = await purgeExpired(sql);
         const leases = await reapExpiredLeases(sql);
         const settled = await purgeSettled(sql);
-        if (nonces + leases + settled > 0) {
-          log.info({ nonces, leases, settled }, "housekeeping purged rows");
+        // Raw webhook bodies and finished outbox rows are operational
+        // residue, not evidence — the audit log and mandate artifacts are
+        // what is kept forever. Without a retention bound both grow one row
+        // per event for the life of the deployment.
+        const events = await purgeProcessedEvents(sql);
+        const outboxDone = await purgeDone(sql);
+        if (nonces + leases + settled + events + outboxDone > 0) {
+          log.info(
+            { nonces, leases, settled, events, outbox_done: outboxDone },
+            "housekeeping purged rows",
+          );
         }
       }
-      ticks += 1;
     } catch (error) {
       log.error({ err: error }, "worker tick failed");
     } finally {
+      // Counted in finally: a tick that throws before this line would
+      // otherwise pin the counter and re-run housekeeping every tick.
+      ticks += 1;
       running = false;
     }
   };
 
-  const timer = setInterval(() => void tick(), intervalMs);
-  void tick();
+  const run = (): Promise<void> => {
+    current = tick();
+    return current;
+  };
+  const timer = setInterval(() => void run(), intervalMs);
+  void run();
 
-  return () => {
+  // Stopping waits for the tick in progress. Closing the pool underneath a
+  // running Razorpay call would leave its outbox row in_flight until the
+  // lease lapsed — recoverable now, but a wait costs nothing and a deploy
+  // should not depend on the recovery path.
+  return async () => {
     stopped = true;
     clearInterval(timer);
+    await current;
   };
 }
 
