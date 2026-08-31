@@ -157,3 +157,44 @@ describe("live Razorpay client", () => {
     expect(urls[1]).toContain("skip=100");
   });
 });
+
+describe("listing payments", () => {
+  it("accepts fee: null on payments Razorpay has not captured yet", async () => {
+    // The real API sends a literal null, not an absent field — the first
+    // live reconciliation sweep died on it.
+    const razorpay = liveRazorpay({
+      keyId: KEY,
+      keySecret: SECRET,
+      fetch: async () =>
+        respond(200, {
+          items: [
+            {
+              id: "pay_auth",
+              order_id: "order_1",
+              amount: 1499,
+              currency: "INR",
+              status: "authorized",
+              fee: null,
+              created_at: 1_755_700_500,
+            },
+            {
+              id: "pay_cap",
+              order_id: "order_2",
+              amount: 1499,
+              currency: "INR",
+              status: "captured",
+              fee: 35,
+              created_at: 1_755_700_501,
+            },
+          ],
+          count: 2,
+        }),
+    });
+
+    const payments = await razorpay.listPayments({ from: 0, to: 2_000_000_000 });
+    expect(payments.map((p) => [p.id, p.feeMinor])).toEqual([
+      ["pay_auth", 0n],
+      ["pay_cap", 35n],
+    ]);
+  });
+});

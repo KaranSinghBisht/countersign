@@ -101,7 +101,9 @@ const PaymentSchema = z.object({
   amount: z.number().int().nonnegative(),
   currency: z.string().length(3),
   status: z.string().min(1),
-  fee: z.number().int().nonnegative().optional(),
+  // Razorpay sends fee: null until a payment is captured — a literal null,
+  // not an absent field. Seen in production on the first live sweep.
+  fee: z.number().int().nonnegative().nullable().optional(),
   created_at: z.number().int(),
 });
 

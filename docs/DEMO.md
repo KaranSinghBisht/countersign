@@ -9,7 +9,7 @@ differentiation.
 ## Setup, before recording
 
 ```bash
-make setup && make up && make check   # 399 unit tests, secret scan
+make setup && make up && make check   # 400 unit tests, secret scan
 make dev                              # serves / and the purchase surface on :3000
 make cli                              # dist/countersign.mjs
 ```
