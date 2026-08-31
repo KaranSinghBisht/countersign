@@ -1,0 +1,7 @@
+# TLS from Let's Encrypt for the public hostname; everything else to the app.
+# Caddy adds nothing the app does not already set, and forwards the raw body
+# untouched — the webhook signature is over those bytes.
+{$PUBLIC_HOST} {
+	encode gzip
+	reverse_proxy app:3000
+}

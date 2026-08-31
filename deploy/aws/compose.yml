@@ -1,0 +1,63 @@
+# Production compose for one EC2 instance: the app, its Postgres, and Caddy
+# terminating TLS on a public hostname. Everything the app needs comes from
+# /opt/countersign/app.env, which deploy.sh copies up and which never enters
+# git (see .gitignore: .env.*).
+#
+#   PUBLIC_HOST=1-2-3-4.sslip.io docker compose up -d
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: countersign
+      POSTGRES_DB: countersign
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # Same deterministic collation as docker-compose.yml: sort order takes
+      # part in the Merkle tree's leaf ordering.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U countersign -d countersign"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    image: countersign:latest
+    restart: unless-stopped
+    env_file: /opt/countersign/app.env
+    environment:
+      PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST to the public hostname}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+secrets:
+  postgres_password:
+    file: /opt/countersign/postgres_password
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

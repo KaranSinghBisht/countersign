@@ -4,6 +4,12 @@
  *
  *     pnpm exec tsx scripts/gen-keys.ts          # print
  *     pnpm exec tsx scripts/gen-keys.ts --write  # patch .env in place
+ *     pnpm exec tsx scripts/gen-keys.ts --trust .countersign/aws/trust.aws.json \
+ *                                       --audience https://example.com   # a deployment's own pair
+ *
+ * Every deployment gets its own keys: the trust file names the audience its
+ * mandates are addressed to, so a bundle from one deployment cannot pass as
+ * another's, and a laptop's private keys never leave the laptop.
  *
  * Keys are emitted as base64url-encoded JWKs so they survive a single
  * environment variable without quoting problems.
@@ -15,7 +21,7 @@
  * it is checking.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { b64u, utf8 } from "../src/crypto/encoding.js";
@@ -47,14 +53,21 @@ const KEYS: readonly KeySpec[] = [
   },
 ];
 
+function flag(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
+
 async function main(): Promise<void> {
   const write = process.argv.includes("--write");
+  const audience = flag("--audience") ?? "http://localhost:3000";
+  const trustPath = flag("--trust") ?? join(ROOT, "trust.json");
   const lines: string[] = [];
   const trust: Record<string, unknown> = {
     $comment:
       "Public verification keys. Safe to publish. The verifier takes --trust pointing HERE, never a copy packed into an export bundle.",
     origin: "countersign.dev/audit",
-    audience: "http://localhost:3000",
+    audience,
     checkpoint_key_name: "countersign.dev/audit",
     keys: {},
   };
@@ -73,7 +86,7 @@ async function main(): Promise<void> {
   // The public half, in the shape the verifier's --trust flag expects. A
   // verifier that learned its keys from the bundle under inspection would
   // prove nothing, so these have to be distributed out of band.
-  const trustPath = join(ROOT, "trust.json");
+  mkdirSync(dirname(trustPath), { recursive: true });
   writeFileSync(trustPath, `${JSON.stringify(trust, null, 2)}\n`, "utf8");
 
   if (!write) {
