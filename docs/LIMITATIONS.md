@@ -32,6 +32,8 @@ Copied from the build plan §7 so a reviewer does not have to hunt.
 
 13. **Abuse controls are single-node.** The per-IP rate limit on `/nonce` and `/purchase` is in-memory, and housekeeping (nonce purge, idempotency retention) runs on the worker's timer. Multiple replicas would each keep their own counters. Remedy: a shared store for both, once there is more than one box.
 
+14. **A refused order keeps its budget hold.** When Razorpay refuses to create the order (a 4xx, or retries exhausted), the payment is failed, the ledger hold is released and the mandate's one-in-flight slot is freed — so the next purchase under that mandate proceeds. The mandate's spend counter, however, still carries the amount: the audit record already committed `spent_after`, and giving the budget back automatically would let a run of refusals be retried without limit. A timeout is different — the order may have landed, so the payment is `in_doubt` and the slot stays held until a lookup settles it. Remedy: a signed reversal record (a negative action the verifier's L5/L6 checks would have to admit) written by a human-driven reconciliation step, not by the worker.
+
 ---
 
 What this list is not: a promise that the next two weeks close it. See `docs/ARCHITECTURE.md` for what those two weeks would actually buy, and for the one decision we would reverse.

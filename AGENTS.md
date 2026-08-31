@@ -11,7 +11,7 @@ The LLM is not a principal. It cannot reach `decide()`.
 ```
 make setup              # deps, .env, signing keys
 make up                 # postgres + jaeger
-make check              # lint, types, unit tests, secret scan — not integration
+make check              # lint, types, unit tests, secret scan, quoted counts — not integration
 make test-integration   # needs make up; 20-vs-3 and purchase→export→verify live here
 make demo               # eight rehearsed failures; writes .countersign/export + trust.json
 make export             # the LIVE audit log as a verifiable bundle (needs a checkpoint)
@@ -67,7 +67,7 @@ We score ourselves. The gaps stay in the table.
 | Pillar | Score | /Max | % | Band | Notes |
 |---|---:|---:|---:|---|---|
 | Context | 10 | 14 | 71% | Assisted | Root + nested `AGENTS.md`. No `repo-skill` corpus, no Slash-extracted knowledge docs. |
-| Testing | 22 | 30 | 73% | Assisted | 394 unit tests under `make check`; integration (webhook adversarial table, 20-vs-3 concurrency, recon, purchase→export→verify e2e) is a separate CI job. No browser E2E, no OpenAPI, no contract suite. |
+| Testing | 22 | 30 | 73% | Assisted | 399 unit tests under `make check`; integration (webhook adversarial table, 20-vs-3 concurrency, recon, purchase→export→verify e2e) is a separate CI job. No browser E2E, no OpenAPI, no contract suite. |
 | CI/CD | 7 | 14 | 50% | Needs Work | GitHub Actions: lint, types, unit, vector replay, secret scan on full history, integration against Postgres. No deploy, no agent-reviewer skill in CI. |
 | **Aggregate** | **39** | **58** | **67%** | **Assisted** | Below Ready. Published including the miss. |
 

@@ -53,9 +53,9 @@ The LLM is not a principal. It cannot reach `decide()`. A prompt injection that 
 
 ## What is not in the box
 
-Discovery (ACP / UCP / `/agents.md`), a catalog, an MCP tool surface, and a 402 challenge route are designed and not shipped. HTTP today is `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
+Discovery *documents* now ship: `/` is a landing page for humans, `/agents.md` is the contract a buyer agent follows, `/llms.txt` points crawlers at both — static strings compiled into the build. What remains designed and not shipped: an ACP / UCP checkout session, a catalog or quoting endpoint, an MCP tool surface, and a 402 challenge route. HTTP today is `/`, `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
 
-That is the weakest part of the submission. See below.
+An agent can read how to buy here; it cannot yet discover *what* to buy. See below.
 
 ## Defense notes
 
@@ -65,7 +65,7 @@ A reviewer will ask these. The answers, unprompted.
 
 The human root of trust is simulated, **and** an AI buyer cannot discover us.
 
-The first is a cryptography honesty problem: `make keys` mints the issuer, so a verified chain proves our consent surface signed the open mandate, not that a person did. The second is a product honesty problem: Track 01 asked for a merchant an AI buyer can find and buy from end to end. We built the gate, the rail, and the proof. We did not build `/.well-known/acp.json`. A judge who opens the README, follows the quickstart, and expects Claude to complete a purchase will bounce.
+The first is a cryptography honesty problem: `make keys` mints the issuer, so a verified chain proves our consent surface signed the open mandate, not that a person did. The second is a product honesty problem: Track 01 asked for a merchant an AI buyer can find and buy from end to end. We built the gate, the rail, the proof, and — late — the reading material (`/agents.md`, `/llms.txt`, a landing page). We did not build `/.well-known/acp.json`, a catalog, or a checkout session. A judge who opens the README, follows the quickstart, and expects Claude to complete a purchase will bounce.
 
 We would rather be scored on the half nobody else built — bounded and provable — than ship a thin ACP wrapper over an unsigned log. That is a bet, not a disguise.
 
@@ -79,7 +79,7 @@ What we would reverse: **spending Day 10 on the Razorpay adapter before a single
 
 In order, and none of it is a dashboard:
 
-1. `/.well-known/acp.json`, `/agents.md`, `/llms.txt`, and one ACP checkout session over the gate that already exists.
+1. `/.well-known/acp.json` and one ACP checkout session over the gate that already exists. (`/agents.md`, `/llms.txt` and the human landing page shipped after the original list was written.)
 2. WebAuthn on the consent step, so the issuer key lives on a device.
 3. POST each checkpoint to an endpoint we do not control. Completeness stays unprovable; equivocation becomes detectable.
 4. An authenticated approval surface for the escalation resume path — a signed approval token bound to the closed mandate's `jti` — so `unresolved_constraint` stops being terminal over HTTP.

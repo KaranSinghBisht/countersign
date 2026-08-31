@@ -5,7 +5,7 @@
 **Submission:** Razorpay AI Buildathon, Track 01 — AI Growth & Agentic Commerce
 **Judging bar (verbatim):** *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
 
-> **Status, 2026-08-26.** This file is the locked design from day 0. The as-built product is [README.md](../README.md). Section 1 still states the original thesis (ACP, 402, discoverable merchant). Those were not shipped. HTTP today is `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. A real purchase writes the audit record in the same transaction as the spend, the worker publishes checkpoints, and `make export` writes the live log as a bundle the offline CLI verifies (`test/integration/export.test.ts` is the end-to-end proof). Unchecked items in §4 are the ones that would mislead a judge who treats this file as a shipping list.
+> **Status, 2026-08-26.** This file is the locked design from day 0. The as-built product is [README.md](../README.md). Section 1 still states the original thesis (ACP, 402, discoverable merchant). Those were not shipped. HTTP today is `/` (landing page), `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*` — discovery documents, not an ACP/UCP/MCP protocol surface. A real purchase writes the audit record in the same transaction as the spend, the worker publishes checkpoints, and `make export` writes the live log as a bundle the offline CLI verifies (`test/integration/export.test.ts` is the end-to-end proof). Unchecked items in §4 are the ones that would mislead a judge who treats this file as a shipping list.
 
 ---
 
