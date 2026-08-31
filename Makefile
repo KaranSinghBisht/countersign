@@ -47,15 +47,17 @@ reset:
 
 ## migrate: apply pending migrations
 migrate:
-	@pnpm exec tsx scripts/migrate.ts
+	@pnpm exec tsx --env-file=.env scripts/migrate.ts
 
 ## clean: stop containers and delete the database volume
 clean:
 	@docker compose down -v
 
 ## dev: run the API with reload
+# --env-file: tsx does not load .env on its own, and config fails closed on
+# a missing variable — without this flag a cold clone's `make dev` dies at boot.
 dev:
-	@pnpm exec tsx watch src/http/server.ts
+	@pnpm exec tsx watch --env-file=.env src/http/server.ts
 
 ## test: run unit tests
 test:
@@ -66,7 +68,11 @@ test-integration:
 	@pnpm exec vitest run --project integration
 
 ## check: everything CI runs — lint, types, tests, secret scan
-check: verify-make lint typecheck test scan-secrets
+check: verify-make lint typecheck test scan-secrets counts
+
+## counts: the test counts quoted on the landing page and in the docs match the tree
+counts:
+	@pnpm exec tsx scripts/check-counts.ts
 
 ## lint: check formatting and lint rules
 lint:
@@ -99,13 +105,17 @@ vectors:
 keys:
 	@pnpm exec tsx scripts/gen-keys.ts
 
-## demo: eight rehearsed failures; writes .countersign/export + trust.json (needs `make up` for 6 and 8)
+## demo: eight rehearsed failures; writes .countersign/export + trust.demo.json (needs `make up` for 6 and 8)
 demo:
 	@pnpm exec tsx scripts/rehearse.ts
 
+## buy: one real purchase through the running server (needs `make dev`); ARGS="--amount 6000000" to be denied, ARGS="--escalate" to escalate
+buy:
+	@pnpm exec tsx --env-file=.env scripts/buy.ts $(ARGS)
+
 ## export: write the LIVE audit log as a verifiable bundle (needs `make up` and a published checkpoint)
 export:
-	@pnpm exec tsx scripts/export-bundle.ts
+	@pnpm exec tsx --env-file=.env scripts/export-bundle.ts
 
 ## cli: single-file verifier, for handing to a judge on a USB stick
 cli:
@@ -116,7 +126,7 @@ cli:
 	@./dist/countersign.mjs --help >/dev/null
 	@echo "wrote dist/countersign.mjs"
 
-.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli demo export
+.PHONY: help setup up down reset migrate clean dev test test-integration check lint fix typecheck scan-secrets vectors keys verify-make cli demo buy export
 
 # Guard against exactly that recurring: fail if any .PHONY target has no
 # recipe. `make -pq` prints the database; a real target reports its commands.

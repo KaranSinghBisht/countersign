@@ -46,6 +46,12 @@ jobs:
       - name: Unit tests
         run: pnpm exec vitest run --project unit
 
+      # The deployable is `node dist/src/http/server.js`. Compiling in CI is
+      # what catches a build that typechecks but cannot boot — the migrations
+      # path bug lived here undetected because nothing ever built dist.
+      - name: Production build compiles
+        run: pnpm build
+
       # The vectors pin the exact bytes the standalone verifier must
       # reproduce. Regenerating must be a no-op; if it is not, a dependency
       # bump has silently changed the wire format.
@@ -103,3 +109,10 @@ jobs:
         env:
           DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
         run: pnpm exec vitest run --project integration
+
+      # The landing page and the docs quote test counts; they are pinned to
+      # what vitest collects so the numbers cannot go stale unnoticed.
+      - name: Quoted test counts match the tree
+        env:
+          DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
+        run: pnpm exec tsx scripts/check-counts.ts
