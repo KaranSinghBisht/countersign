@@ -10,16 +10,21 @@ differentiation.
 
 ```bash
 make setup && make up && make check   # 401 unit tests, secret scan
-make dev                              # serves / and the purchase surface on :3000
+make dev                              # serves / and the purchase surface on PORT from .env
 make cli                              # dist/countersign.mjs
 ```
 
-Record the terminal at 18pt+ in a clean theme. Rehearse the first thirty
+Record the terminal at 18pt+ in a clean theme; browser close-ups at 125%+
+zoom — the smallest landing text is 11.5px mono. Rehearse the first thirty
 seconds until they are automatic.
+
+`PORT` comes from `.env`: 3000 on a fresh clone, **3100 on the machine this
+was recorded on** (another app owns 3000 there). The URLs below say :3100;
+substitute yours.
 
 ## 0:00–0:30 — The front door
 
-Open `http://localhost:3000/`. The hero is a looping pixel checkpoint — a
+Open `http://localhost:3100/`. The hero is a looping pixel checkpoint — a
 barrier arm, ALLOW / DENY / ESCALATE scrolls on the road, a locked chest, a
 wax-sealed ledger — with live decision toasts floating in the sky. Read the
 two lines on screen, verbatim:
@@ -130,7 +135,7 @@ Then the production path:
 ```bash
 make export   # seals the log if the worker has not yet, then writes the LIVE bundle
 ./dist/countersign.mjs verify --bundle .countersign/live-export --trust ./trust.json
-curl -s localhost:3000/audit/orders/<order_id> | head -c 400   # the Razorpay order → its decision
+curl -s localhost:3100/audit/orders/<order_id> | head -c 400   # the Razorpay order → its decision
 ```
 
 `./trust.json` is the server pair from `make keys`; the rehearsal used

@@ -60,8 +60,22 @@ function flag(name: string): string | undefined {
 
 async function main(): Promise<void> {
   const write = process.argv.includes("--write");
+  const force = process.argv.includes("--force");
   const audience = flag("--audience") ?? "http://localhost:3000";
   const trustPath = flag("--trust") ?? join(ROOT, "trust.json");
+
+  // Print mode generates keys that go nowhere; silently replacing the default
+  // trust.json with their public halves desyncs it from the keys the server
+  // actually runs (.env) — exactly what a casual pre-demo `make keys` would
+  // smuggle in. Rotating for real is `--write`: keys and trust move together.
+  if (!write && !force && flag("--trust") === undefined && existsSync(trustPath)) {
+    console.error(
+      `refusing to overwrite ${trustPath}: these keys are not going into .env, ` +
+        "so the file would stop matching the running server. " +
+        "Use --write to rotate keys and trust together, or --force to overwrite anyway.",
+    );
+    process.exit(1);
+  }
   const lines: string[] = [];
   const trust: Record<string, unknown> = {
     $comment:

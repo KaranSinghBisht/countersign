@@ -7,6 +7,8 @@
  *     pnpm exec tsx scripts/rehearse.ts --offline   # skip webhook + duplicate
  *
  * Webhook and duplicate need postgres (`make up`). The other six do not.
+ * Rehearses in its own database (countersign_demo, created on first run), so
+ * a rehearsal never disturbs `make dev`'s audit log mid-demo.
  * Always writes `.countersign/export` + `.countersign/trust.demo.json` for the USB CLI.
  */
 
@@ -18,8 +20,36 @@ import { assertSafeToTruncate } from "../src/db/safety.js";
 import { formatRehearsal, runRehearsal } from "../src/demo/rehearse.js";
 import { writeDemoExport } from "../src/demo/sample-bundle.js";
 
-const URL =
-  process.env.DATABASE_URL ?? "postgres://countersign:countersign@localhost:5432/countersign";
+const DEFAULT_URL = "postgres://countersign:countersign@localhost:5432/countersign_demo";
+const URL = process.env.DATABASE_URL ?? DEFAULT_URL;
+
+/**
+ * The webhook and duplicate rehearsals truncate every table they touch, so by
+ * default the rehearsal runs in its own database — `make buy`'s audit trail
+ * must survive a `make demo` run between the purchase and the export. Created
+ * here on first run; an explicit DATABASE_URL is honored as-is.
+ */
+async function ensureDemoDatabase(): Promise<void> {
+  if (process.env.DATABASE_URL !== undefined) {
+    return;
+  }
+  const maintenance = new globalThis.URL(DEFAULT_URL);
+  const name = maintenance.pathname.slice(1);
+  maintenance.pathname = "/postgres";
+  const sql = connect({ url: maintenance.toString(), max: 1, connectTimeoutSeconds: 3 });
+  try {
+    const found = await sql`SELECT 1 FROM pg_database WHERE datname = ${name}`;
+    if (found.length === 0) {
+      await sql.unsafe(`CREATE DATABASE "${name}"`);
+      process.stderr.write(`created ${name} — the rehearsal runs in its own database\n`);
+    }
+  } catch {
+    // Postgres unreachable: the reachability probe below already degrades to
+    // the six offline scenarios; nothing to add here.
+  } finally {
+    await sql.end();
+  }
+}
 
 async function writeUsbArtifacts(): Promise<void> {
   const root = join(process.cwd(), ".countersign");
@@ -47,6 +77,7 @@ async function main(): Promise<void> {
     } else {
       // The webhook and duplicate rehearsals reset every table first.
       assertSafeToTruncate(URL, "make demo");
+      await ensureDemoDatabase();
       const sql = connect({ url: URL, max: 4, connectTimeoutSeconds: 3 });
 
       // Reachability is probed separately from the rehearsal itself: a judge
