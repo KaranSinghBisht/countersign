@@ -52,7 +52,7 @@ The repo also ships fifteen written limitations, each with a named remedy — th
 
 ## Honest metrics (for any free-text space)
 
-- 401 unit + 144 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
+- 401 unit + 145 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
 - 30 offline verifier checks across seven groups.
 - 8 rehearsed failures, run live by `make demo`.
 - 15 written limitations, each with a named remedy ([`LIMITATIONS.md`](LIMITATIONS.md)).

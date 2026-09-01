@@ -151,7 +151,9 @@ Razorpay dashboard; with `RAZORPAY_MODE=fake` it is minted locally).
 
 ## 4:15–5:00 — What we did not build, unprompted
 
-Twenty seconds, not forty-five; the fence line is the close.
+Twenty seconds, not forty-five; the fence line is the close. Say it over
+`http://localhost:3100/architecture` — the whole system on one screen, served
+by the merchant itself.
 
 > "No catalog, no ACP session, no MCP surface — carts are agreed out of band,
 > and `/agents.md` says so. The human root of trust is simulated: the chain

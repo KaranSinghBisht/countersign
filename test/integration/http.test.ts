@@ -80,6 +80,17 @@ describe("discovery documents", () => {
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ outcome: "rejected", at: "schema", detail: "no such route" });
   });
+
+  it("serves the system diagram at /architecture", async () => {
+    const page = await app.inject({ method: "GET", url: "/architecture" });
+    expect(page.statusCode).toBe(200);
+    expect(page.headers["content-type"]).toContain("text/html");
+    expect(page.body).toContain("/assets/architecture.png");
+
+    const image = await app.inject({ method: "GET", url: "/assets/architecture.png" });
+    expect(image.statusCode).toBe(200);
+    expect(image.headers["content-type"]).toBe("image/png");
+  });
 });
 
 describe("hero media", () => {

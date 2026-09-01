@@ -2,6 +2,10 @@
 
 Countersign is a merchant-side agentic commerce server. An AI buyer proposes a purchase; a deterministic gate decides; a Razorpay order is the rail; a Merkle-chained audit log is the evidence. A third party verifies the evidence offline, with our process switched off, against public keys they already have.
 
+![Countersign, end to end — principals, the gate, one transaction, the money rail, offline evidence](../assets/landing/architecture.png)
+
+*The running server serves this diagram itself at `/architecture`.*
+
 ```
 agent proposal
       │

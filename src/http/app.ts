@@ -27,6 +27,7 @@ import { NonceBodySchema, PurchaseBodySchema, purchase } from "../payments/purch
 import { ingest } from "../razorpay/webhook.js";
 import { issue } from "../spend/nonce.js";
 import { agentsMd, llmsTxt } from "./pages/agents.js";
+import { architectureHtml } from "./pages/architecture.js";
 import { heroPoster, heroVideo, landingAssets } from "./pages/assets.js";
 import { landingScript, renderLanding } from "./pages/landing.js";
 import { registerPay } from "./pay.js";
@@ -129,6 +130,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   );
   app.get("/llms.txt", async (_request, reply) =>
     reply.type("text/plain; charset=utf-8").send(llmsTxt),
+  );
+  app.get("/architecture", async (_request, reply) =>
+    reply.type("text/html; charset=utf-8").send(architectureHtml),
   );
 
   // Safari refuses to play media from a server that ignores Range requests,
