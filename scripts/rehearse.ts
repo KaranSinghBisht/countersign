@@ -13,7 +13,7 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { connect } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { assertSafeToTruncate } from "../src/db/safety.js";
@@ -55,9 +55,13 @@ async function writeUsbArtifacts(): Promise<void> {
   const root = join(process.cwd(), ".countersign");
   mkdirSync(root, { recursive: true });
   const artifacts = await writeDemoExport(root);
+  // Relative to the working directory: the demo is recorded, and a home path
+  // on screen is noise a judge does not need.
+  const bundle = relative(process.cwd(), artifacts.bundle);
+  const trust = relative(process.cwd(), artifacts.trust);
   process.stdout.write(
-    `\nwrote ${artifacts.bundle}\n      ${artifacts.trust}\n` +
-      `verify: ./dist/countersign.mjs verify --bundle ${artifacts.bundle} --trust ${artifacts.trust}\n`,
+    `\nwrote ${bundle}\n      ${trust}\n` +
+      `verify: ./dist/countersign.mjs verify --bundle ${bundle} --trust ${trust}\n`,
   );
 }
 
