@@ -1,27 +1,56 @@
 # Submission crib sheet
 
-Everything the form asks for, in one place. Fill the video URL after recording.
+The exact fields of the "Razorpay AI Builder Internship 2026" form, with paste-ready
+answers. Their site says the last question is the one they read first, and the form
+ends with a no-edits-after-submit confirmation — so run the checklist at the bottom
+before pressing Submit.
 
-- **Project**: Countersign
-- **One-liner**: A merchant server an AI buyer can buy from — and that can prove afterwards the agent was never allowed outside its budget.
-- **Track**: 01 — AI Growth & Agentic Commerce. Judging bar, verbatim: *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
-- **Repo**: https://github.com/KaranSinghBisht/countersign — must be public before submitting; the live site's footer and `/llms.txt` already link to it
-- **Live**: https://65-2-105-145.sslip.io (`/`, `/agents.md`, `/llms.txt`, `/healthz`, `/audit/*`) — Razorpay test mode
-- **Video**: _add after recording — the script is [`DEMO.md`](DEMO.md)_
+## About you (fill live)
 
-## What we built
+Full name · college · graduation year · in-person from September (yes/no) ·
+6 or 12 months · resume file (taken, not screened on).
 
-A merchant-side spend gate for AI buyers on Razorpay test mode. A human-signed **open mandate** bounds an agent-signed **closed mandate** (~120 s to live, bound to a server nonce and the cart's hash); a pure `decide()` the LLM cannot reach evaluates every rule; the purchase, spend lock, audit record and payment intent commit in **one Postgres transaction**; a transactional outbox talks to Razorpay Orders / Checkout / webhooks; every action — ALLOW, DENY and ESCALATE alike — lands in a hash-chained, RFC 6962 Merkle, Ed25519-checkpointed audit log; a single-file offline verifier re-runs 30 checks and replays `decide()` with the server switched off.
+## Selected Track
 
-## How to verify, fastest first
+Track 1: AI Growth & Agentic Commerce
 
-1. Open https://65-2-105-145.sslip.io — the scorecard maps the judging bar to runnable commands; `/agents.md` is the contract a buyer agent reads.
-2. `make setup && make up && make check` — 401 unit tests, lint, types, secret scan, quoted counts.
-3. `make demo` — eight rehearsed failures (prompt injection, budget deny, escalation, two tamperings, an omission, a dropped webhook, a duplicate receipt) and a bundle in `.countersign/export`.
-4. `make cli && ./dist/countersign.mjs verify --bundle .countersign/export --trust .countersign/trust.demo.json` — 30 checks, exit 0, server off.
-5. With `rzp_test_` credentials in `.env`: `make dev`, then `make buy`, then open the printed `/pay/order_…` link and pay with the test rails — the order and the captured payment appear on the Razorpay test dashboard. `make export` then verifies the **live** log the same way.
+## Project Name / Title
 
-## Honest metrics
+Countersign — provable agent spending on Razorpay
+
+## Project Objectives (what does it solve?)
+
+An AI agent can already spend money; nobody can prove it was allowed to. Countersign is the merchant side of that problem: a server an AI buyer can purchase from, where every money action is explainable, bounded and gated — the track's bar, taken literally. A human signs an open mandate (per-transaction cap, aggregate budget, payees, escalation threshold); the agent signs a ~120-second closed mandate bound to a server-issued nonce and the exact cart; a pure decide() function the LLM cannot reach evaluates every rule; the purchase, spend lock, audit record and Razorpay payment intent commit in one Postgres transaction. Every decision — refusals included — lands in a hash-chained, RFC 6962 Merkle, Ed25519-checkpointed audit log that a single-file verifier re-checks offline (30 checks) with the server switched off. The rail is real Razorpay test mode: orders, Checkout, signed callbacks, webhooks, capture, reconciliation — live at https://65-2-105-145.sslip.io, with 401 unit + 144 integration tests and the quoted numbers pinned in CI.
+
+## GitHub Repository URL
+
+https://github.com/KaranSinghBisht/countersign — flip to PUBLIC before submitting.
+
+## 5-min Pitch Video Link
+
+(unlisted is fine — paste after recording; the script is DEMO.md)
+
+## Build Challenges & Technical Obstacles (read first — the real resume)
+
+The best bug found us in production. During a live test-mode payment, the payer tab closed during Checkout's redirect, so the signed callback never arrived — and the webhook had been registered seconds after the payment, so it never fired either. The payment sat authorized at Razorpay and our ledger didn't know. We recovered it by API capture, then made the recovery systematic: a reconciliation sweep every ~10 minutes lists Razorpay's view, adopts any state we missed, and queues capture for stranded authorizations. The first sweep then crashed in production — the real API returns fee: null until a payment is captured, which the docs don't advertise. Schema fixed, regression test added.
+
+Double charges were the failure we designed against hardest. A timeout on order-create is not a failure — the order may have landed — so we refuse to guess: the payment goes to an in_doubt state and recovery asks Razorpay about our receipt. The receipt is derived (SHA-256 of the closed mandate id + request hash), so any retry produces the same receipt, and Razorpay's own duplicate-receipt 400 becomes our recovery signal instead of a second order. One purchase cannot become two; the integration suite proves it.
+
+The demo destroyed its own evidence. Our rehearsal command truncated the same database the real purchases lived in — following our own demo script (buy → rehearse → export) wiped the audit log mid-take. We caught it by pointing an adversarial agent at the script to run every command verbatim; rehearsals now run in their own database, created on first use.
+
+Two smaller ones: merkletreejs omits RFC 6962's domain-separation prefixes by default (leaf/node confusion makes proofs forgeable), so we hand-rolled ~60 lines and tested them against the RFC's published vectors. And the campus network blocks outbound SSH entirely, so the EC2 deployment runs through an Instance Connect Endpoint tunnel.
+
+The repo also ships fifteen written limitations, each with a named remedy — the honest list is part of the build.
+
+## Pre-submit checklist (the form forbids edits after submitting)
+
+1. Repo flipped PUBLIC — open the URL in an incognito window and see code.
+2. Video uploaded (unlisted ok) — open the link in incognito, it plays.
+3. Video link pasted into README and this file.
+4. Live instance healthy: https://65-2-105-145.sslip.io/healthz → {"ok":true}.
+5. Only then tick "Final Submission Confirmation" and Submit.
+
+## Honest metrics (for any free-text space)
 
 - 401 unit + 144 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
 - 30 offline verifier checks across seven groups.
