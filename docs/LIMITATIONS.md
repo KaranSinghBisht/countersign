@@ -38,4 +38,4 @@ Copied from the build plan §7 so a reviewer does not have to hunt.
 
 ---
 
-What this list is not: a promise that the next two weeks close it. See `docs/ARCHITECTURE.md` for what those two weeks would actually buy, and for the one decision we would reverse.
+What this list is not: a promise that the next two weeks close it. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for what those two weeks would actually buy, and for the one decision we would reverse.

@@ -6,6 +6,8 @@ A merchant server an AI buyer can buy from, that can prove afterwards the agent 
 
 Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 01. Judging bar, verbatim: *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
 
+**Live now, in Razorpay test mode:** [`65-2-105-145.sslip.io`](https://65-2-105-145.sslip.io) — this build on one AWS box, serving `/`, [`/agents.md`](https://65-2-105-145.sslip.io/agents.md), `/llms.txt`, the purchase surface and `/audit/*`. Real test-mode orders have been created, paid through Checkout, captured and confirmed by signed `payment.captured` webhooks against this instance; the trail sits on the Razorpay test dashboard. Deployment: [`deploy/aws/README.md`](deploy/aws/README.md).
+
 The demos out there prove an agent can spend money. This proves it should have been allowed to.
 
 ---
@@ -99,7 +101,7 @@ A naive `sed` on an amount fails L2 at that `seq`. Recomputing the hash chain so
 
 ## Limitations
 
-Fourteen of them, unhedged, in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md). The short list: the log cannot prove it is complete; keys are on the box; the human root of trust is simulated; UPI Reserve Pay is modelled because SBMD is activation-gated in sandbox; `ts` is self-asserted; bounded is not wise; agent and actor identity are self-asserted; escalation has no authenticated resume path yet; a refused order keeps its budget hold; the tokens are AP2-shaped, not AP2-compliant; nothing here is audited.
+Fifteen of them, unhedged, in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md). The short list: the log cannot prove it is complete; keys are on the box; the human root of trust is simulated; UPI Reserve Pay is modelled because SBMD is activation-gated in sandbox; `ts` is self-asserted; the payment-signature fact is merchant-asserted; bounded is not wise; agent and actor identity are self-asserted; escalation has no authenticated resume path yet; a refused order keeps its budget hold; the tokens are AP2-shaped, not AP2-compliant; nothing here is audited.
 
 Cryptography constrains authority. It does not confer judgment.
 
@@ -110,9 +112,11 @@ Cryptography constrains authority. It does not confer judgment.
 | [`AGENTS.md`](AGENTS.md) | How to work on this repo, including a **67% Agent Readiness** self-score and the gaps |
 | [`docs/DEMO.md`](docs/DEMO.md) | The five-minute demo script, as built — every command in it runs |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Diagram, defense notes, the Razorpay-500 path |
-| [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | The fourteen |
+| [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | The fifteen |
 | [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) | DPDP, RBI localization, SAQ A posture — not a compliance claim |
 | [`docs/PLAN.md`](docs/PLAN.md) | Locked decisions and the fourteen days |
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Landscape, with sources, including what could not be verified |
+| [`docs/SUBMISSION.md`](docs/SUBMISSION.md) | The submission crib sheet: URLs, one-liner, how to verify |
+| [`deploy/aws/README.md`](deploy/aws/README.md) | The one-box AWS deployment behind the live URL |
 
 `test/no-pii-in-prompt.test.ts` is the localization rule as a test: a dirty fixture (PAN, name, VPA, `pay_…`) is projected and none of it survives.

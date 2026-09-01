@@ -13,7 +13,7 @@ make setup              # deps, .env, signing keys
 make up                 # postgres + jaeger
 make check              # lint, types, unit tests, secret scan, quoted counts — not integration
 make test-integration   # needs make up; 20-vs-3 and purchase→export→verify live here
-make demo               # eight rehearsed failures; writes .countersign/export + trust.json
+make demo               # eight rehearsed failures; writes .countersign/export + trust.demo.json
 make export             # the LIVE audit log as a verifiable bundle (needs a checkpoint)
 make cli                # dist/countersign.mjs — USB-stick verifier
 ```

@@ -200,7 +200,7 @@ export const landingBody = `
             <li>Offline verifier — 30 checks, pinned trust</li>
             <li>Discovery docs — /, /agents.md, /llms.txt</li>
             <li>401 unit + 142 integration tests in CI</li>
-            <li>Fourteen unhedged limitations, each with a named remedy</li>
+            <li>Fifteen unhedged limitations, each with a named remedy</li>
           </ul>
         </div>
         <div class="panel notyet">
@@ -257,7 +257,7 @@ export const landingBody = `
     <div class="cols">
       <div>
         Built for the <a href="https://razorpay.com/buildathon/">Razorpay AI Buildathon</a>, Track 01 · test mode only<br>
-        Fourteen limitations, unhedged, in <a href="https://github.com/KaranSinghBisht/countersign/blob/master/docs/LIMITATIONS.md">docs/LIMITATIONS.md</a> — each with a named remedy
+        Fifteen limitations, unhedged, in <a href="https://github.com/KaranSinghBisht/countersign/blob/master/docs/LIMITATIONS.md">docs/LIMITATIONS.md</a> — each with a named remedy
       </div>
       <div class="mono">
         GET /healthz · POST /nonce · POST /purchase<br>

@@ -51,9 +51,15 @@ The LLM is not a principal. It cannot reach `decide()`. A prompt injection that 
 
 **Webhooks see the raw body.** A global JSON parser is the usual cause of signature failures. Dedupe is an `INSERT` keyed on the SHA-256 of the signed bytes — the `x-razorpay-event-id` header rides outside the signature, so a captured body replayed under fresh ids is still one event. State is monotonic; deliveries are unordered. The staleness window is 26 hours, because Razorpay retries for 24.
 
+## Runtime and deployment
+
+Fastify 5 on Node 22; Postgres is the only store (postgres.js, `bigint` paise everywhere). Two processes share it: the HTTP server, and a worker that drains the transactional outbox, publishes audit checkpoints, runs housekeeping, and sweeps a periodic Razorpay reconciliation. OpenTelemetry traces land in Jaeger in dev (`make up`).
+
+Deployed as one box: Docker Compose — the app image, `postgres:17`, and Caddy terminating TLS — on EC2, described in [`../deploy/aws/README.md`](../deploy/aws/README.md). The live instance is https://65-2-105-145.sslip.io, on real Razorpay test-mode keys: boot refuses `rzp_live_` keys, and a public origin refuses `RAZORPAY_MODE=fake`.
+
 ## What is not in the box
 
-Discovery *documents* now ship: `/` is a landing page for humans, `/agents.md` is the contract a buyer agent follows, `/llms.txt` points crawlers at both — static strings compiled into the build. What remains designed and not shipped: an ACP / UCP checkout session, a catalog or quoting endpoint, an MCP tool surface, and a 402 challenge route. HTTP today is `/`, `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
+Discovery *documents* now ship: `/` is a landing page for humans, `/agents.md` is the contract a buyer agent follows, `/llms.txt` points crawlers at both — static strings compiled into the build. What remains designed and not shipped: an ACP / UCP checkout session, a catalog or quoting endpoint, an MCP tool surface, and a 402 challenge route. HTTP today is `/`, `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `GET /pay/:order_id` and `POST /pay/:order_id/complete` (the page a human pays the resulting Razorpay order on — Checkout, test mode; the callback is believed only after its signature verifies against the key secret, and it queues capture — the `payment.captured` webhook is the second, independent path to the same capture), `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
 
 An agent can read how to buy here; it cannot yet discover *what* to buy. See below.
 

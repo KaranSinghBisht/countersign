@@ -67,7 +67,33 @@ const problems = mismatches([
   },
   { file: "docs/DEMO.md", pattern: /(\d+) unit tests/, expected: [unit] },
   { file: "AGENTS.md", pattern: /(\d+) unit tests/, expected: [unit] },
+  {
+    file: "docs/SUBMISSION.md",
+    pattern: /(\d+) unit \+ (\d+) integration tests/,
+    expected: [unit, integration],
+  },
 ]);
+
+// The limitations count is quoted in words, not digits; pin it the same way.
+const limitations = readFileSync("docs/LIMITATIONS.md", "utf8").match(/^\d+[a-z]?\. \*\*/gm) ?? [];
+if (limitations.length !== 15) {
+  problems.push(
+    `docs/LIMITATIONS.md: ${limitations.length} numbered limitations, the copy says fifteen`,
+  );
+}
+const WORD_QUOTES: readonly (readonly [string, string])[] = [
+  ["README.md", "Fifteen of them"],
+  ["README.md", "The fifteen"],
+  ["docs/DEMO.md", "Fifteen"],
+  ["docs/SUBMISSION.md", "15 written limitations"],
+  ["src/http/pages/landing-body.ts", "Fifteen unhedged limitations"],
+  ["src/http/pages/landing-body.ts", "Fifteen limitations, unhedged"],
+];
+for (const [file, needle] of WORD_QUOTES) {
+  if (!readFileSync(file, "utf8").includes(needle)) {
+    problems.push(`${file}: no longer says "${needle}" — the limitations count drifted`);
+  }
+}
 
 if (problems.length > 0) {
   process.stderr.write(`${problems.join("\n")}\n`);

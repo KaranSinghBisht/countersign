@@ -119,8 +119,11 @@ output, pick one and read the line:
   ledger posting**, never an `UPDATE`.
 - **Duplicate receipt** — Razorpay's own 400, recovered by looking up **our**
   derived receipt; no second order.
-- **Timeout** — `in_doubt`, never `failed`, never a second charge; the worker
-  asks Razorpay about the receipt instead of replaying the create.
+
+A third graceful failure runs in CI rather than in `make demo`: a create that
+times out goes `in_doubt` — never `failed`, never a second charge — and the
+worker asks Razorpay about **our** derived receipt instead of replaying the
+create (`test/integration/razorpay.test.ts`, `test/integration/outbox.test.ts`).
 
 Then the production path:
 
@@ -147,7 +150,7 @@ Twenty seconds, not forty-five; the fence line is the close.
 
 > "No catalog, no ACP session, no MCP surface — carts are agreed out of band,
 > and `/agents.md` says so. The human root of trust is simulated: the chain
-> proves our consent surface signed, not that a person did. Fourteen
+> proves our consent surface signed, not that a person did. Fifteen
 > limitations are written down with a named remedy each. What breaks first:
 > the checkpoint key lives on the box, which is why the verifier's trust file
 > travels separately."
