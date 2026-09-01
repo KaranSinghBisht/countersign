@@ -13,6 +13,7 @@
  * purchase plugin so the webhook child keeps a Buffer.
  */
 
+import { createHash } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { ulid } from "ulid";
@@ -27,8 +28,12 @@ import { ingest } from "../razorpay/webhook.js";
 import { issue } from "../spend/nonce.js";
 import { agentsMd, llmsTxt } from "./pages/agents.js";
 import { heroPoster, heroVideo, landingAssets } from "./pages/assets.js";
-import { renderLanding } from "./pages/landing.js";
+import { landingScript, renderLanding } from "./pages/landing.js";
 import { registerPay } from "./pay.js";
+
+// The landing page's one inline script, allowed by its exact hash so the
+// default CSP needs no 'unsafe-inline' for scripts anywhere.
+const LANDING_SCRIPT_SHA256 = createHash("sha256").update(landingScript, "utf8").digest("base64");
 
 export interface AppDeps {
   readonly sql: Sql;
@@ -80,9 +85,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     return reply.code(500).send({ outcome: "error", detail: "internal" });
   });
 
+  // An unknown path answers in the contract's envelope too — Fastify's
+  // default 404 body is the one shape /agents.md never lists.
+  app.setNotFoundHandler((_request, reply) => {
+    reply.code(404).send({ outcome: "rejected", at: "schema", detail: "no such route" });
+  });
+
   // Defense-in-depth headers on every response. The landing page is a fixed
   // server-rendered string, so the CSP mostly says what it already is: same
-  // origin, inline style and one inline script, no framing anywhere.
+  // origin, inline style, exactly one inline script (pinned by hash, not
+  // 'unsafe-inline'), no framing anywhere.
   app.addHook("onSend", async (_request, reply) => {
     reply.header("x-content-type-options", "nosniff");
     reply.header("x-frame-options", "DENY");
@@ -94,7 +106,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       reply.header(
         "content-security-policy",
         "default-src 'self'; img-src 'self' data:; media-src 'self'; " +
-          "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; " +
+          `style-src 'self' 'unsafe-inline'; script-src 'sha256-${LANDING_SCRIPT_SHA256}'; ` +
           "frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
       );
     }

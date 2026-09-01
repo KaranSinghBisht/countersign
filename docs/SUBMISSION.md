@@ -23,7 +23,7 @@ A merchant-side spend gate for AI buyers on Razorpay test mode. A human-signed *
 
 ## Honest metrics
 
-- 401 unit + 142 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
+- 401 unit + 144 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
 - 30 offline verifier checks across seven groups.
 - 8 rehearsed failures, run live by `make demo`.
 - 15 written limitations, each with a named remedy ([`LIMITATIONS.md`](LIMITATIONS.md)).

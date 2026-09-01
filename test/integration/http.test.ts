@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { append, publishCheckpoint } from "../../src/audit/log.js";
@@ -44,6 +45,19 @@ describe("discovery documents", () => {
     expect(response.body).toContain("/agents.md");
   });
 
+  it("pins the landing page's one inline script by CSP hash, not 'unsafe-inline'", async () => {
+    const response = await app.inject({ method: "GET", url: "/" });
+    const csp = String(response.headers["content-security-policy"]);
+    // The hash in the header must cover the exact bytes between the script
+    // tags — recompute it from the served page, so whitespace drift fails here
+    // instead of silently disabling the script in every browser.
+    const script = /<script>([\s\S]*?)<\/script>/.exec(response.body)?.[1] ?? "";
+    expect(script.length).toBeGreaterThan(0);
+    const digest = createHash("sha256").update(script, "utf8").digest("base64");
+    expect(csp).toContain(`script-src 'sha256-${digest}'`);
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+  });
+
   it("serves the buyer-agent contract at /agents.md", async () => {
     const response = await app.inject({ method: "GET", url: "/agents.md" });
     expect(response.statusCode).toBe(200);
@@ -59,6 +73,12 @@ describe("discovery documents", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/plain");
     expect(response.body).toContain("/agents.md");
+  });
+
+  it("answers unknown routes in the contract's envelope, not Fastify's", async () => {
+    const response = await app.inject({ method: "GET", url: "/nope" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ outcome: "rejected", at: "schema", detail: "no such route" });
   });
 });
 

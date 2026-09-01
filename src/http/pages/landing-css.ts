@@ -369,7 +369,8 @@ export const landingCss = `
     @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
     @keyframes bob { from { translate: 0 0; } to { translate: 0 -6px; } }
     .sl-token, .band-token, .path-cap { animation: bob 4.5s ease-in-out infinite alternate; }
-    .stamp-img, .vs-stamp { opacity: 0; animation: stamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) 0.5s forwards; }
+    .js .stamp-img, .js .vs-stamp { opacity: 0; }
+    .js .stamp-img.stamped, .js .vs-stamp.stamped { animation: stamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) 0.15s forwards; }
     @keyframes stamp { from { opacity: 0; transform: scale(1.6) rotate(2deg); } to { opacity: 1; transform: none; } }
     .rail::after { transform: scaleX(0); animation: draw 1.1s ease-out 0.3s forwards; }
     @keyframes draw { to { transform: scaleX(1); } }

@@ -4,8 +4,10 @@
  * Served at GET /. Assembled from static strings at import time: no database
  * read, no template engine, no external fonts or scripts — the page renders
  * offline and identically on a judge's laptop, because it opens the demo
- * video. The one exception to zero-JS is a three-line reduced-motion guard
- * that pauses the hero loop.
+ * video. The one exception to zero-JS is the inline script below: a
+ * reduced-motion guard for the hero loop, and the observer that fires the
+ * VERIFIED stamps when they scroll into view. Its exact text is allowed by
+ * hash in the CSP (see buildApp), so no other inline script can ever run.
  *
  * Layout: the hero (here) is the pixel checkpoint world — assets/hero-video.mp4
  * over a full-screen stage with decision toasts. Everything below the melt
@@ -20,6 +22,35 @@ import { landingCss } from "./landing-css.js";
 const TITLE = "Countersign — provable agent spending on Razorpay";
 const DESCRIPTION =
   "A merchant-side spend gate for AI buyers. Bounded by signed mandates, decided by deterministic code, logged in a Merkle tree, verifiable offline.";
+
+/**
+ * The only client JavaScript on the page, exported as one string so the CSP
+ * can allow exactly this text by 'sha256-…' hash instead of 'unsafe-inline'.
+ * Without JavaScript (or IntersectionObserver) the html "js" class is never
+ * added and the stamps are simply visible — stillness, not blanks.
+ */
+export const landingScript = `
+  // Honor reduced motion for the hero loop, which CSS alone cannot pause.
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    var v = document.querySelector(".stage-video");
+    if (v) { v.removeAttribute("autoplay"); v.pause(); }
+  }
+  // The VERIFIED chops stamp themselves when scrolled into view.
+  if ("IntersectionObserver" in window) {
+    document.documentElement.className += " js";
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.className += " stamped";
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    document.querySelectorAll(".stamp-img, .vs-stamp").forEach(function (el) {
+      io.observe(el);
+    });
+  }
+`;
 
 /**
  * Rendered once at boot with the deployment's public base URL, because link
@@ -106,14 +137,7 @@ export function renderLanding(baseUrl: string): string {
   <div class="stage-fade"></div>
 </div>
 ${landingBody}
-<script>
-  // The only client JavaScript on the page: honor reduced motion for the
-  // hero loop, which CSS alone cannot pause.
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    var v = document.querySelector(".stage-video");
-    if (v) { v.removeAttribute("autoplay"); v.pause(); }
-  }
-</script>
+<script>${landingScript}</script>
 
 </body>
 </html>

@@ -15,7 +15,8 @@ export const agentsMd = `# Countersign — for buyer agents
 A merchant-side spend gate on Razorpay (test mode). You cannot talk this
 server into anything: purchases are decided by deterministic code over a
 signed mandate chain, and every decision — ALLOW, DENY or ESCALATE — lands in
-a Merkle-logged audit trail your principal can verify offline.
+a Merkle-logged audit trail your principal can verify offline. There is no
+LLM in the decision path: the model cannot reach \`decide()\`.
 
 Base URL: the origin serving this document. All bodies are JSON. Unknown or
 extra fields are rejected, not ignored.
