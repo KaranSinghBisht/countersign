@@ -1,5 +1,7 @@
 # Countersign
 
+[![CI](https://github.com/KaranSinghBisht/countersign/actions/workflows/ci.yml/badge.svg)](https://github.com/KaranSinghBisht/countersign/actions/workflows/ci.yml)
+
 > **countersign** *(n.)* — a second signature that validates the first; also, the word you must give at a checkpoint before you are let through.
 
 A merchant server an AI buyer can buy from, that can prove afterwards the agent was never allowed outside its budget.
@@ -7,6 +9,8 @@ A merchant server an AI buyer can buy from, that can prove afterwards the agent 
 Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 01. Judging bar, verbatim: *"Every money action explainable, bounded and gated. Show the audit trail and one failure handled gracefully."*
 
 **Live now, in Razorpay test mode:** [`65-2-105-145.sslip.io`](https://65-2-105-145.sslip.io) — this build on one AWS box, serving `/`, [`/agents.md`](https://65-2-105-145.sslip.io/agents.md), `/llms.txt`, the purchase surface and `/audit/*`. Real test-mode orders have been created, paid through Checkout, captured and confirmed by signed `payment.captured` webhooks against this instance; the trail sits on the Razorpay test dashboard. Deployment: [`deploy/aws/README.md`](deploy/aws/README.md).
+
+**Live evidence, for a reader who cannot run code.** A real test-mode order placed through the gate on the public instance: [`/audit/orders/order_TWLltVAmqEBj13`](https://65-2-105-145.sslip.io/audit/orders/order_TWLltVAmqEBj13) resolves Razorpay's order id to the decision that allowed it (seq 0, ALLOW, the reason in words). The same flow on a laptop, as Razorpay's own dashboard saw it: [the payment captured](docs/evidence/razorpay-payment-captured.png) — `pay_TWtb2EtzAZI2wz` against `order_TWtY1rNxPGEZRq`, with our derived receipt in the description field — and [the signed Checkout callback](docs/evidence/checkout-callback-verified.png), verified before anything is written.
 
 The demos out there prove an agent can spend money. This proves it should have been allowed to.
 
