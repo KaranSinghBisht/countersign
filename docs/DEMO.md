@@ -139,7 +139,8 @@ curl -s localhost:3100/audit/orders/<order_id> | head -c 400   # the Razorpay or
 ```
 
 `./trust.json` is the server pair from `make keys`; the rehearsal used
-`trust.demo.json`. The order id is on the `make buy` output once the worker
+`trust.demo.json`. Its `audience` must equal `COUNTERSIGN_BASE_URL` — M6
+holds every mandate to it. The order id is on the `make buy` output once the worker
 has created the order (with test-mode keys it is a real `order_…` on the
 Razorpay dashboard; with `RAZORPAY_MODE=fake` it is minted locally).
 

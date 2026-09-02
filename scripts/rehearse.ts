@@ -15,6 +15,7 @@
 import { mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { connect } from "../src/db/client.js";
+import { ensureDatabase } from "../src/db/ensure.js";
 import { migrate } from "../src/db/migrate.js";
 import { assertSafeToTruncate } from "../src/db/safety.js";
 import { formatRehearsal, runRehearsal } from "../src/demo/rehearse.js";
@@ -33,21 +34,8 @@ async function ensureDemoDatabase(): Promise<void> {
   if (process.env.DATABASE_URL !== undefined) {
     return;
   }
-  const maintenance = new globalThis.URL(DEFAULT_URL);
-  const name = maintenance.pathname.slice(1);
-  maintenance.pathname = "/postgres";
-  const sql = connect({ url: maintenance.toString(), max: 1, connectTimeoutSeconds: 3 });
-  try {
-    const found = await sql`SELECT 1 FROM pg_database WHERE datname = ${name}`;
-    if (found.length === 0) {
-      await sql.unsafe(`CREATE DATABASE "${name}"`);
-      process.stderr.write(`created ${name} — the rehearsal runs in its own database\n`);
-    }
-  } catch {
-    // Postgres unreachable: the reachability probe below already degrades to
-    // the six offline scenarios; nothing to add here.
-  } finally {
-    await sql.end();
+  if (await ensureDatabase(DEFAULT_URL)) {
+    process.stderr.write("created countersign_demo — the rehearsal runs in its own database\n");
   }
 }
 

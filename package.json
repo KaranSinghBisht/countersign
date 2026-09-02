@@ -2,7 +2,16 @@
   "name": "countersign",
   "version": "0.1.0",
   "private": true,
-  "description": "Merchant-side spend gate and offline verifier. Serves / and /agents.md as discovery documents; no catalog, ACP session, or MCP surface yet.",
+  "description": "A merchant-side spend gate for AI buyers on Razorpay: signed mandates, a pure decide(), a Merkle-logged audit trail, and an offline verifier.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaranSinghBisht/countersign.git"
+  },
+  "homepage": "https://65-2-105-145.sslip.io",
+  "bugs": {
+    "url": "https://github.com/KaranSinghBisht/countersign/issues"
+  },
+  "author": "Karan Singh Bisht",
   "license": "MIT",
   "type": "module",
   "engines": {

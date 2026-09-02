@@ -24,7 +24,8 @@ export function formatReport(report: Report): string {
   if (report.ok) {
     lines.push(`VERIFIED  ${report.passed}/${report.total} checks`);
   } else {
-    lines.push(`FAILED    ${report.failed}/${report.total} checks failed`);
+    const unrun = report.skipped > 0 ? `, ${report.skipped} not evaluated` : "";
+    lines.push(`FAILED    ${report.failed}/${report.total} checks failed${unrun}`);
   }
 
   let group = "";
@@ -37,7 +38,7 @@ export function formatReport(report: Report): string {
     lines.push(formatCheck(check));
   }
 
-  const failures = report.checks.filter((c) => !c.ok);
+  const failures = report.checks.filter((c) => !c.ok && !c.skipped);
   if (failures.length > 0) {
     lines.push("");
     lines.push("failures:");
@@ -49,11 +50,17 @@ export function formatReport(report: Report): string {
     }
   }
 
+  const unrun = report.checks.filter((c) => c.skipped).map((c) => c.spec.id);
+  if (unrun.length > 0) {
+    lines.push("");
+    lines.push(`not evaluated (an earlier check failed first): ${unrun.join(" ")}`);
+  }
+
   return `${lines.join("\n")}\n`;
 }
 
 function formatCheck(check: CheckResult): string {
-  const mark = check.ok ? "ok" : "FAIL";
+  const mark = check.ok ? "ok" : check.skipped ? "--" : "FAIL";
   return `    ${check.spec.id.padEnd(4)} ${mark.padEnd(4)}  ${check.spec.name}`;
 }
 
@@ -62,12 +69,14 @@ export function reportToJson(report: Report): unknown {
     ok: report.ok,
     passed: report.passed,
     failed: report.failed,
+    skipped: report.skipped,
     total: report.total,
     checks: report.checks.map((c) => ({
       id: c.spec.id,
       group: c.spec.group,
       name: c.spec.name,
       ok: c.ok,
+      skipped: c.skipped,
       findings: c.findings,
     })),
   };

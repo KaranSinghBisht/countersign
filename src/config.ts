@@ -24,90 +24,106 @@ const NonEmpty = z.string().trim().min(1);
  */
 const Secret = z.string().min(16, "must be at least 16 characters");
 
-const ConfigSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+const ConfigSchema = z
+  .object({
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
-  /**
-   * Our own origin. Used as the `aud` of every mandate and as the realm in
-   * the 402 challenge, so a mandate minted for another deployment cannot be
-   * replayed against this one.
-   */
-  COUNTERSIGN_BASE_URL: z.url(),
+    /**
+     * Our own origin. Used as the `aud` of every mandate and as the realm in
+     * the 402 challenge, so a mandate minted for another deployment cannot be
+     * replayed against this one.
+     */
+    COUNTERSIGN_BASE_URL: z.url(),
 
-  DATABASE_URL: z.url().refine((v) => v.startsWith("postgres"), {
-    message: "must be a postgres:// or postgresql:// URL",
-  }),
-  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+    DATABASE_URL: z.url().refine((v) => v.startsWith("postgres"), {
+      message: "must be a postgres:// or postgresql:// URL",
+    }),
+    DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
 
-  /**
-   * Razorpay test-mode credentials.
-   *
-   * The `rzp_test_` check is a real safety interlock, not decoration: this
-   * codebase creates orders and captures payments, and a live key in a
-   * hackathon repo moves actual money. CI greps for `rzp_live_` as well.
-   */
-  RAZORPAY_KEY_ID: NonEmpty.refine((v) => v.startsWith("rzp_test_"), {
-    message: "must be a TEST-mode key id (rzp_test_...). This service refuses to run live.",
-  }),
-  RAZORPAY_KEY_SECRET: Secret,
-  /** Distinct from the API key secret. Signs webhook bodies; rotated separately. */
-  RAZORPAY_WEBHOOK_SECRET: Secret,
-  /**
-   * `fake` swaps the outbox worker's Razorpay client for the in-memory one
-   * the tests use, so a laptop without test-mode credentials still creates
-   * "orders" and the whole loop — order id, receipt, /audit/orders — can be
-   * walked. Refused in production: nothing fake may stand behind a real
-   * public URL.
-   */
-  RAZORPAY_MODE: z.enum(["live", "fake"]).default("live"),
-  /**
-   * Razorpay retries a webhook for 24 hours, so a delivery can legitimately
-   * arrive a day late. Copying Stripe's 5-minute tolerance here would reject
-   * exactly the retries the replay window exists to accept.
-   */
-  WEBHOOK_MAX_AGE_SECONDS: z.coerce
-    .number()
-    .int()
-    .min(60)
-    .default(26 * 60 * 60),
+    /**
+     * Razorpay test-mode credentials.
+     *
+     * The `rzp_test_` check is a real safety interlock, not decoration: this
+     * codebase creates orders and captures payments, and a live key in a
+     * hackathon repo moves actual money. CI greps for `rzp_live_` as well.
+     */
+    RAZORPAY_KEY_ID: NonEmpty.refine((v) => v.startsWith("rzp_test_"), {
+      message: "must be a TEST-mode key id (rzp_test_...). This service refuses to run live.",
+    }),
+    RAZORPAY_KEY_SECRET: Secret,
+    /** Distinct from the API key secret. Signs webhook bodies; rotated separately. */
+    RAZORPAY_WEBHOOK_SECRET: Secret,
+    /**
+     * `fake` swaps the outbox worker's Razorpay client for the in-memory one
+     * the tests use, so a laptop without test-mode credentials still creates
+     * "orders" and the whole loop — order id, receipt, /audit/orders — can be
+     * walked. Refused in production: nothing fake may stand behind a real
+     * public URL.
+     */
+    RAZORPAY_MODE: z.enum(["live", "fake"]).default("live"),
+    /**
+     * Razorpay retries a webhook for 24 hours, so a delivery can legitimately
+     * arrive a day late. Copying Stripe's 5-minute tolerance here would reject
+     * exactly the retries the replay window exists to accept.
+     */
+    WEBHOOK_MAX_AGE_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .default(26 * 60 * 60),
 
-  /**
-   * Reserved for a 402 challenge HMAC. Nothing in this tree reads it —
-   * there is no challenge route — so it is optional. If set, it must still
-   * look like a secret, so a pasted `"changeme"` fails closed.
-   */
-  CHALLENGE_HMAC_SECRET: Secret.optional(),
-  CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(10).max(900).default(300),
+    /**
+     * Reserved for a 402 challenge HMAC. Nothing in this tree reads it —
+     * there is no challenge route — so it is optional. If set, it must still
+     * look like a secret, so a pasted `"changeme"` fails closed.
+     */
+    CHALLENGE_HMAC_SECRET: Secret.optional(),
+    CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(10).max(900).default(300),
 
-  /**
-   * Signing keys as base64url-encoded JWKs.
-   *
-   * On the box, in the environment, with no HSM and no KMS — a limitation
-   * stated plainly in docs/LIMITATIONS.md rather than papered over. Whoever
-   * holds the checkpoint key can rebuild and re-sign the audit log.
-   */
-  MANDATE_ISSUER_JWK: NonEmpty,
-  AGENT_SIGNING_JWK: NonEmpty,
-  CHECKPOINT_JWK: NonEmpty,
+    /**
+     * Signing keys as base64url-encoded JWKs.
+     *
+     * On the box, in the environment, with no HSM and no KMS — a limitation
+     * stated plainly in docs/LIMITATIONS.md rather than papered over. Whoever
+     * holds the checkpoint key can rebuild and re-sign the audit log.
+     */
+    MANDATE_ISSUER_JWK: NonEmpty,
+    AGENT_SIGNING_JWK: NonEmpty,
+    CHECKPOINT_JWK: NonEmpty,
 
-  /**
-   * The origin named in signed checkpoint notes. Must match the `origin` a
-   * verifier pins in trust.json, or every exported bundle fails L10.
-   */
-  AUDIT_ORIGIN: NonEmpty.default("countersign.dev/audit"),
+    /**
+     * The origin named in signed checkpoint notes. Must match the `origin` a
+     * verifier pins in trust.json, or every exported bundle fails L10.
+     */
+    AUDIT_ORIGIN: NonEmpty.default("countersign.dev/audit"),
 
-  /** Mandate lifetimes. Closed mandates are short by design. */
-  OPEN_MANDATE_TTL_SECONDS: z.coerce
-    .number()
-    .int()
-    .min(60)
-    .default(24 * 60 * 60),
-  CLOSED_MANDATE_TTL_SECONDS: z.coerce.number().int().min(10).max(600).default(120),
+    /** Mandate lifetimes. Closed mandates are short by design. */
+    OPEN_MANDATE_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .default(24 * 60 * 60),
+    CLOSED_MANDATE_TTL_SECONDS: z.coerce.number().int().min(10).max(600).default(120),
 
-  OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
-});
+    OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    // .env.example ships placeholder keys. Under `live` the worker would call
+    // Razorpay with them, every order would 401 in the log, and the purchase
+    // would still answer "permitted" — a trap for anyone who skipped the README.
+    const placeholder =
+      /^rzp_test_x+$/.test(cfg.RAZORPAY_KEY_ID) || cfg.RAZORPAY_KEY_SECRET.startsWith("replace_me");
+    if (cfg.RAZORPAY_MODE === "live" && placeholder) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RAZORPAY_MODE"],
+        message:
+          "live with the placeholder keys from .env.example — paste real rzp_test_ keys, or set RAZORPAY_MODE=fake",
+      });
+    }
+  });
 
 export type Config = z.infer<typeof ConfigSchema>;
 

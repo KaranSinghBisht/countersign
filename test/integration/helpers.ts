@@ -1,9 +1,12 @@
 import { connect, type Sql } from "../../src/db/client.js";
+import { ensureDatabase } from "../../src/db/ensure.js";
 import { migrate } from "../../src/db/migrate.js";
 import { assertSafeToTruncate } from "../../src/db/safety.js";
 
+// Never the dev database by default: the suite truncates every table. The
+// throwaway is created on first use.
 const URL =
-  process.env.DATABASE_URL ?? "postgres://countersign:countersign@localhost:5432/countersign";
+  process.env.DATABASE_URL ?? "postgres://countersign:countersign@localhost:5432/countersign_ci";
 
 export function testDb(): Sql {
   assertSafeToTruncate(URL, "the integration suite");
@@ -31,6 +34,7 @@ const TABLES = [
 
 /** Build the schema. Safe to call repeatedly; migrations are recorded. */
 export async function migrateOnce(sql: Sql): Promise<void> {
+  await ensureDatabase(URL);
   await migrate(sql);
 }
 

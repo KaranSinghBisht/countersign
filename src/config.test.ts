@@ -48,6 +48,16 @@ describe("parseConfig", () => {
 
   it("rejects a placeholder secret that is too short to be real", () => {
     expect(() => parseConfig({ ...VALID, RAZORPAY_KEY_SECRET: "changeme" })).toThrow(/at least 16/);
+
+    // .env.example's placeholders are long enough to pass the length check, so
+    // live mode must refuse them by shape; fake mode never calls Razorpay.
+    const example = {
+      ...VALID,
+      RAZORPAY_KEY_ID: "rzp_test_xxxxxxxxxxxxxx",
+      RAZORPAY_KEY_SECRET: "replace_me_at_least_16_chars",
+    };
+    expect(() => parseConfig({ ...example, RAZORPAY_MODE: "live" })).toThrow(/placeholder keys/);
+    expect(parseConfig({ ...example, RAZORPAY_MODE: "fake" }).RAZORPAY_MODE).toBe("fake");
   });
 
   it("boots without the unused 402 challenge secret", () => {

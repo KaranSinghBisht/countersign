@@ -10,6 +10,8 @@ Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 
 
 **Live now, in Razorpay test mode:** [`65-2-105-145.sslip.io`](https://65-2-105-145.sslip.io) — this build on one AWS box, serving `/`, [`/agents.md`](https://65-2-105-145.sslip.io/agents.md), `/llms.txt`, the purchase surface and `/audit/*`. Real test-mode orders have been created, paid through Checkout, captured and confirmed by signed `payment.captured` webhooks against this instance; the trail sits on the Razorpay test dashboard. Deployment: [`deploy/aws/README.md`](deploy/aws/README.md).
 
+**Demo video (5 min):** coming with the submission — the script is [`docs/DEMO.md`](docs/DEMO.md).
+
 **Live evidence, for a reader who cannot run code.** A real test-mode order placed through the gate on the public instance: [`/audit/orders/order_TWLltVAmqEBj13`](https://65-2-105-145.sslip.io/audit/orders/order_TWLltVAmqEBj13) resolves Razorpay's order id to the decision that allowed it (seq 0, ALLOW, the reason in words). The same flow on a laptop, as Razorpay's own dashboard saw it: [the payment captured](docs/evidence/razorpay-payment-captured.png) — `pay_TWtb2EtzAZI2wz` against `order_TWtY1rNxPGEZRq`, with our derived receipt in the description field — and [the signed Checkout callback](docs/evidence/checkout-callback-verified.png), verified before anything is written.
 
 **Judge it in three minutes, no install** — six GETs on the public instance:
@@ -59,13 +61,13 @@ The bar is written in the language of measurement. So we built the part the bar 
 
 ## Quickstart
 
-Needs Node 22, pnpm, Docker.
+Needs Node 22, pnpm (`corepack enable` gives the pinned version) and Docker.
 
 ```bash
 make setup    # pinned deps, .env from example, signing keys
-# add rzp_test_ credentials to .env for real test-mode orders; without them
-# set RAZORPAY_MODE=fake so `make dev` still creates orders (in memory) —
-# the fake client is what make demo and the tests use
+# .env ships in RAZORPAY_MODE=fake: `make dev` mints orders in memory, so the
+# whole loop runs with no credentials. Paste rzp_test_ keys and set
+# RAZORPAY_MODE=live for real test-mode orders on the Razorpay dashboard
 make up       # postgres :5432, jaeger :16686
 make check    # lint, types, unit tests, secret scan, quoted counts
 make demo
@@ -82,10 +84,10 @@ make demo     # writes .countersign/export + .countersign/trust.demo.json
 make cli
 ./dist/countersign.mjs verify --bundle .countersign/export --trust .countersign/trust.demo.json
 ./dist/countersign.mjs verify-receipt --receipt .countersign/export/receipts/<id>.json --trust .countersign/trust.demo.json
-./dist/countersign.mjs explain --bundle .countersign/export --order order_MgXyZ1abc
+./dist/countersign.mjs explain --bundle .countersign/export --seq 0
 ```
 
-`--trust` is a file **you** already have. A `trust.json` packed into the bundle is ignored. Exit codes: 0 verified, 1 a check failed, 2 malformed bundle, 3 trust file unusable.
+`--trust` is a file **you** already have. A `trust.json` packed into the bundle is ignored. Its `audience` must equal the server's `COUNTERSIGN_BASE_URL` (check M6 holds every mandate to it): `make setup` copies it from `.env`, so if you move the server to another port, edit that one field to match. Exit codes: 0 verified, 1 a check failed, 2 malformed bundle, 3 trust file unusable.
 
 The demo bundle is a rehearsal; the same path runs against production data. `make export` writes the **live** audit log — records, checkpoint notes, the exact mandate JWSes and checkouts each decision was made against — as a bundle the same CLI verifies. `test/integration/export.test.ts` proves the loop end to end: two real purchases through `POST /purchase` (one permitted, one denied), a signed checkpoint, an export, and all 30 checks passing offline.
 

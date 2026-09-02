@@ -30,8 +30,10 @@ if (url === undefined || url === "") {
 /** Same rule as the worker: publish only if the log has grown past the last seal. */
 async function sealIfGrown(sql: Sql): Promise<void> {
   const jwk = process.env.CHECKPOINT_JWK;
-  const origin = process.env.AUDIT_ORIGIN;
-  if (jwk === undefined || jwk === "" || origin === undefined || origin === "") return;
+  // Same default as src/config.ts, so a fresh clone that never set AUDIT_ORIGIN
+  // still seals with the name the worker uses.
+  const origin = process.env.AUDIT_ORIGIN || "countersign.dev/audit";
+  if (jwk === undefined || jwk === "") return;
 
   const n = await size(sql);
   if (n === 0) return;

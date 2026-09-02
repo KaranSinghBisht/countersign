@@ -187,7 +187,7 @@ if (body.outcome === "permitted" && typeof body.receipt === "string") {
   out("");
   out(
     payUrl === undefined
-      ? `order not created yet — open ${server}/pay/r/${body.receipt} in a moment to pay it`
+      ? `order not created yet — the worker creates it on Razorpay in the background; open ${server}/pay/r/${body.receipt} in a moment. If it never appears, read the server log: under RAZORPAY_MODE=live Razorpay refuses placeholder keys (401)`
       : `pay it (Razorpay test mode): ${payUrl}`,
   );
 }

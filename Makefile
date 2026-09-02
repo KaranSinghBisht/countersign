@@ -65,7 +65,7 @@ test:
 
 ## test-integration: run integration tests (needs `make up`)
 test-integration:
-	@pnpm exec vitest run --project integration
+	@DATABASE_URL=$${DATABASE_URL:-postgres://countersign:countersign@localhost:5432/countersign_ci} pnpm exec vitest run --project integration
 
 ## check: everything CI runs — lint, types, tests, secret scan
 check: verify-make lint typecheck test scan-secrets counts

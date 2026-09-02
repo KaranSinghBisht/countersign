@@ -53,6 +53,19 @@ const KEYS: readonly KeySpec[] = [
   },
 ];
 
+/**
+ * The audience is the deployment's base URL, and the verifier's M6 check holds
+ * every mandate to it — so a trust.json minted for :3000 fails a server on
+ * :3100. In --write mode .env already exists; take the URL from there.
+ */
+function baseUrlFromEnv(): string | undefined {
+  const envPath = join(ROOT, ".env");
+  if (!existsSync(envPath)) return undefined;
+  const match = /^COUNTERSIGN_BASE_URL=(.+)$/m.exec(readFileSync(envPath, "utf8"));
+  const url = match?.[1]?.trim().replace(/\/+$/, "");
+  return url === undefined || url === "" ? undefined : url;
+}
+
 function flag(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
@@ -61,7 +74,7 @@ function flag(name: string): string | undefined {
 async function main(): Promise<void> {
   const write = process.argv.includes("--write");
   const force = process.argv.includes("--force");
-  const audience = flag("--audience") ?? "http://localhost:3000";
+  const audience = flag("--audience") ?? baseUrlFromEnv() ?? "http://localhost:3000";
   const trustPath = flag("--trust") ?? join(ROOT, "trust.json");
 
   // Print mode generates keys that go nowhere; silently replacing the default

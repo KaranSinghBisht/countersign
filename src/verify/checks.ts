@@ -94,11 +94,15 @@ export interface Finding {
   readonly ok: boolean;
   readonly seq?: number;
   readonly detail: string;
+  /** The check never ran because an earlier one failed first. Not a failure. */
+  readonly skipped?: true;
 }
 
 export interface CheckResult {
   readonly spec: CheckSpec;
   readonly ok: boolean;
+  /** Never evaluated — the bundle failed before this check could run. */
+  readonly skipped: boolean;
   readonly findings: readonly Finding[];
 }
 
@@ -107,6 +111,8 @@ export interface Report {
   readonly checks: readonly CheckResult[];
   readonly passed: number;
   readonly failed: number;
+  /** Checks that never ran. A report with any of these is not verified. */
+  readonly skipped: number;
   readonly total: number;
 }
 
@@ -488,8 +494,18 @@ export async function verifyBundle(bundle: LoadedBundle, trust: Trust): Promise<
 
   vacuousBounds(records, findings, pass);
   const seen = new Set(findings.map((f) => f.check));
+  // A chain that broke early leaves later checks unrun. Reporting those as
+  // FAIL made a single bad signature read as nineteen failures; they are
+  // recorded as skipped so the one real failure is what the reader sees.
   for (const spec of CHECKS) {
-    if (!seen.has(spec.id)) fail(spec.id, "not evaluated");
+    if (!seen.has(spec.id)) {
+      findings.push({
+        check: spec.id,
+        ok: false,
+        skipped: true,
+        detail: "not evaluated — an earlier check failed first",
+      });
+    }
   }
 
   return summarise(findings);
@@ -502,13 +518,22 @@ function summarise(findings: readonly Finding[]): Report {
     return {
       spec,
       ok: failures.length === 0 && mine.length > 0,
+      skipped: mine.length > 0 && mine.every((f) => f.skipped === true),
       findings: failures.length > 0 ? failures : mine.slice(0, 1),
     };
   });
 
   const passed = checks.filter((c) => c.ok).length;
-  const failed = checks.filter((c) => !c.ok).length;
-  return { ok: failed === 0, checks, passed, failed, total: checks.length };
+  const skipped = checks.filter((c) => c.skipped).length;
+  const failed = checks.filter((c) => !c.ok && !c.skipped).length;
+  return {
+    ok: failed === 0 && skipped === 0,
+    checks,
+    passed,
+    failed,
+    skipped,
+    total: checks.length,
+  };
 }
 
 function replayPolicy(
