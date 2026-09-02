@@ -34,7 +34,7 @@ certificate for it. Point a real domain at the IP later and change one line.
    `DATABASE_URL=postgres://countersign:<password>@postgres:5432/countersign`,
    the three `*_JWK` lines from step 1, `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`
    (test mode), `RAZORPAY_WEBHOOK_SECRET` (choose it; paste the same into the
-   Razorpay dashboard), `RAZORPAY_MODE=live`, `WEBHOOK_MAX_AGE_SECONDS=93600`.
+   Razorpay dashboard), `RAZORPAY_MODE=live` (live means the real test-mode API rather than the in-memory fake; keys stay `rzp_test_`, boot refuses `rzp_live_`), `WEBHOOK_MAX_AGE_SECONDS=93600`.
    The Postgres password goes in its own file for compose's secret.
 3. **Instance**: security group with 80/443 open and 22 from your IP, a key
    pair, an Elastic IP, Amazon Linux 2023 with `bootstrap-instance.sh` as

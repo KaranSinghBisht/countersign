@@ -145,6 +145,9 @@ Deny outranks escalate. A currency no \`amount_range\` governs is denied.
 
 Your principal verifies exported bundles offline with the \`countersign\` CLI
 against keys obtained out of band. A \`trust.json\` inside a bundle is ignored.
+The \`origin\` in a checkpoint note (\`countersign.dev/audit\`) is the log's name,
+not a URL: it namespaces signed notes across deployments and is pinned in the
+trust file alongside the key.
 
 ## Not built, said plainly
 

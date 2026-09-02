@@ -1,6 +1,6 @@
 # Limitations
 
-Unhedged. Every item has a named remedy; that is the point of writing them down.
+Unhedged. Every item has a named remedy; that is the point of writing them down. Fifteen items: §6a counts — it was added after §7–§14 were already cross-referenced from other documents, so the numbering stays.
 
 Copied from the build plan §7 so a reviewer does not have to hunt.
 

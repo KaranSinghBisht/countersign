@@ -1,6 +1,6 @@
 # Countersign — agent guide
 
-extracted_at: 2026-08-22
+extracted_at: 2026-09-02
 
 A merchant-side agentic commerce server. An AI buyer proposes; deterministic code decides; Razorpay is the rail; a Merkle log is the evidence. A third party verifies the evidence offline against pinned keys.
 

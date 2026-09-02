@@ -63,7 +63,7 @@ Deployed as one box: Docker Compose — the app image, `postgres:17`, and Caddy 
 
 ## What is not in the box
 
-Discovery *documents* now ship: `/` is a landing page for humans, `/agents.md` is the contract a buyer agent follows, `/llms.txt` points crawlers at both — static strings compiled into the build. What remains designed and not shipped: an ACP / UCP checkout session, a catalog or quoting endpoint, an MCP tool surface, and a 402 challenge route. HTTP today is `/`, `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `GET /pay/:order_id` and `POST /pay/:order_id/complete` (the page a human pays the resulting Razorpay order on — Checkout, test mode; the callback is believed only after its signature verifies against the key secret, and it queues capture — the `payment.captured` webhook is the second, independent path to the same capture), `POST /webhooks/razorpay`, and `GET /audit/*`. The live demo is `make demo` and the verifier, not Claude walking a checkout.
+Discovery *documents* now ship: `/` is a landing page for humans, `/agents.md` is the contract a buyer agent follows, `/llms.txt` points crawlers at both — static strings compiled into the build. What remains designed and not shipped: an ACP / UCP checkout session, a catalog or quoting endpoint, an MCP tool surface, and a 402 challenge route. HTTP today is `/`, `/agents.md`, `/llms.txt`, `/healthz`, `POST /nonce`, `POST /purchase`, `GET /pay/:order_id` and `POST /pay/:order_id/complete` (the page a human pays the resulting Razorpay order on — Checkout, test mode; the callback is believed only after its signature verifies against the key secret, and it queues capture — the `payment.captured` webhook is the second, independent path to the same capture), `POST /webhooks/razorpay`, `GET /audit/*`, and `GET /architecture` (this diagram). The live demo is `make demo` and the verifier, not Claude walking a checkout.
 
 An agent can read how to buy here; it cannot yet discover *what* to buy. See below.
 
@@ -73,7 +73,7 @@ A reviewer will ask these. The answers, unprompted.
 
 ### What is the weakest part?
 
-The human root of trust is simulated, **and** an AI buyer cannot discover us.
+The human root of trust is simulated, **and** an AI buyer cannot discover *what to buy* here.
 
 The first is a cryptography honesty problem: `make keys` mints the issuer, so a verified chain proves our consent surface signed the open mandate, not that a person did. The second is a product honesty problem: Track 01 asked for a merchant an AI buyer can find and buy from end to end. We built the gate, the rail, the proof, and — late — the reading material (`/agents.md`, `/llms.txt`, a landing page). We did not build `/.well-known/acp.json`, a catalog, or a checkout session. A judge who opens the README, follows the quickstart, and expects Claude to complete a purchase will bounce.
 
@@ -83,7 +83,7 @@ We would rather be scored on the half nobody else built — bounded and provable
 
 Hand-rolling the Merkle tree was correct (the prefixes). Hand-rolling a compact-JWS mandate instead of SD-JWT was correct for a two-week clock.
 
-What we would reverse: **spending Day 10 on the Razorpay adapter before a single discovery document existed.** The adapter is the part we are proudest of (`in_doubt`, derived receipts, outbox, recon). It is also the reason there was no day left for `/agents.md`. A merchant that cannot be found and a merchant that can prove a purchase are different products; we picked the second and ran out of calendar on the first.
+What we would reverse: **spending Day 10 on the Razorpay adapter before a single discovery document existed.** The adapter is the part we are proudest of (`in_doubt`, derived receipts, outbox, recon). It is also the reason there was no day left for a catalog or an ACP checkout session. A merchant that cannot be found and a merchant that can prove a purchase are different products; we picked the second and ran out of calendar on the first.
 
 ### What do two more weeks buy?
 

@@ -12,6 +12,15 @@ Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 
 
 **Live evidence, for a reader who cannot run code.** A real test-mode order placed through the gate on the public instance: [`/audit/orders/order_TWLltVAmqEBj13`](https://65-2-105-145.sslip.io/audit/orders/order_TWLltVAmqEBj13) resolves Razorpay's order id to the decision that allowed it (seq 0, ALLOW, the reason in words). The same flow on a laptop, as Razorpay's own dashboard saw it: [the payment captured](docs/evidence/razorpay-payment-captured.png) — `pay_TWtb2EtzAZI2wz` against `order_TWtY1rNxPGEZRq`, with our derived receipt in the description field — and [the signed Checkout callback](docs/evidence/checkout-callback-verified.png), verified before anything is written.
 
+**Judge it in three minutes, no install** — six GETs on the public instance:
+
+- [`/healthz`](https://65-2-105-145.sslip.io/healthz) — the process is up.
+- [`/audit/checkpoint`](https://65-2-105-145.sslip.io/audit/checkpoint) — the latest Ed25519-signed checkpoint over the live log: tree size, root, the signed note.
+- [`/audit/proof?seq=0`](https://65-2-105-145.sslip.io/audit/proof?seq=0) — an RFC 6962 inclusion proof for record 0 against that root.
+- [`/audit/orders/order_TWLltVAmqEBj13`](https://65-2-105-145.sslip.io/audit/orders/order_TWLltVAmqEBj13) — a real Razorpay test-mode order, resolved to the decision that allowed it.
+- [`/architecture`](https://65-2-105-145.sslip.io/architecture) — the whole system on one screen.
+- [`/agents.md`](https://65-2-105-145.sslip.io/agents.md) — the contract a buyer agent reads; every error shape it can receive is listed.
+
 The demos out there prove an agent can spend money. This proves it should have been allowed to.
 
 ---
@@ -32,19 +41,19 @@ make demo     # eight failures (webhook + duplicate need postgres); writes .coun
 make cli      # single-file verifier, for a USB stick
 ```
 
-`make demo` is the five-minute video. It also writes `.countersign/export` and `.countersign/trust.demo.json`. A third party runs `dist/countersign.mjs verify --bundle .countersign/export --trust .countersign/trust.demo.json` on a laptop that has never talked to us. Those keys are the demo pair, not the server keys from `make keys`.
+`make demo` is the middle of the five-minute video. It also writes `.countersign/export` and `.countersign/trust.demo.json`. A third party runs `dist/countersign.mjs verify --bundle .countersign/export --trust .countersign/trust.demo.json` on a laptop that has never talked to us. Those keys are the demo pair, not the server keys from `make keys`.
 
 ---
 
 ## Why this, not a chatbot checkout
 
-Razorpay's MCP server lets an agent operate a **merchant's** account. Prava lets a **buyer's** agent pay (US, Visa, no UPI). Nobody shipped the middle: a merchant an AI buyer has never met can quote against, be bounded by, and be held to afterwards.
+Razorpay's MCP server lets an agent operate a **merchant's** account. Prava lets a **buyer's** agent pay (US, Visa, no UPI — sources in [docs/RESEARCH.md §4](docs/RESEARCH.md)). Nobody shipped the middle: a merchant an AI buyer has never met can quote against, be bounded by, and be held to afterwards.
 
-Track 01's crowded examples — conversational checkout, agent catalog, upsell, campaigns — are solved in public. Shopify serves `/agents.md` on every store. Razorpay themselves shipped agentic checkout with Zomato, Swiggy and Zepto on Claude. A student rebuild of that is strictly worse.
+Track 01's crowded examples — conversational checkout, agent catalog, upsell, campaigns — are solved in public. Shopify storefronts serve `/agents.md`. Razorpay themselves shipped agentic checkout with Zomato, Swiggy and Zepto on Claude ([docs/RESEARCH.md §3–§4](docs/RESEARCH.md); §7 lists what could not be verified). A student rebuild of that is strictly worse.
 
 The bar is written in the language of measurement. So we built the part the bar is actually asking for: a gate the LLM cannot reach, a log a stranger can check, and eight failures that run live.
 
-**What we did not ship, and will say unprompted:** an ACP / UCP checkout session, a catalog, and an MCP tool surface. HTTP today is `/` (a landing page for humans), `/agents.md` and `/llms.txt` (the contract a buyer agent reads before it spends), `/healthz`, `POST /nonce`, `POST /purchase`, `GET /pay/:order_id` (the page a **human** pays the resulting Razorpay order on — Checkout, test mode — with capture queued on Razorpay's signed callback and on the webhook, whichever comes first), `POST /webhooks/razorpay`, and `GET /audit/*`. An AI buyer can now read how to transact here; it still cannot browse a catalog or negotiate a cart — carts are agreed out of band. The bet is that bounded-and-provable, done carefully, outranks discoverable-and-unsigned.
+**What we did not ship, and will say unprompted:** an ACP / UCP checkout session, a catalog, and an MCP tool surface. HTTP today is `/` (a landing page for humans), `/agents.md` and `/llms.txt` (the contract a buyer agent reads before it spends), `/healthz`, `POST /nonce`, `POST /purchase`, `GET /pay/:order_id` (the page a **human** pays the resulting Razorpay order on — Checkout, test mode — with capture queued on Razorpay's signed callback and on the webhook, whichever comes first), `POST /pay/:order_id/complete` (Razorpay's signed callback), `POST /webhooks/razorpay`, `GET /audit/*`, and `GET /architecture`. An AI buyer can now read how to transact here; it still cannot browse a catalog or negotiate a cart — carts are agreed out of band. The human Checkout step is a sandbox constraint, not a design choice: UPI mandates are activation-gated in test mode ([LIMITATIONS §5](docs/LIMITATIONS.md)). The bet is that bounded-and-provable, done carefully, outranks discoverable-and-unsigned.
 
 ---
 
@@ -84,6 +93,8 @@ The demo bundle is a rehearsal; the same path runs against production data. `mak
 
 ## How a purchase is bounded
 
+![Countersign — the whole system on one screen](assets/landing/architecture.png)
+
 1. A human-signed **open** mandate carries constraints (per-txn cap, aggregate budget, payees, rail, escalation threshold, …). Today that key is generated by `make keys` — simulated consent, stated in [LIMITATIONS](docs/LIMITATIONS.md).
 2. The agent signs a **closed** mandate: ~120s, bound to a checkout hash **we** recompute, and to a nonce **we** issued. It cannot widen a parent cap (`narrows` treats omission as widening).
 3. `accept()` takes the cart we quoted. Agent text is hashed. A 90% figure in the body is not a field.
@@ -120,7 +131,7 @@ Cryptography constrains authority. It does not confer judgment.
 | [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) | DPDP, RBI localization, SAQ A posture — not a compliance claim |
 | [`docs/PLAN.md`](docs/PLAN.md) | Locked decisions and the fourteen days |
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Landscape, with sources, including what could not be verified |
-| [`docs/SUBMISSION.md`](docs/SUBMISSION.md) | The submission crib sheet: URLs, one-liner, how to verify |
+| [`docs/SUBMISSION.md`](docs/SUBMISSION.md) | Paste-ready answers for the application form |
 | [`deploy/aws/README.md`](deploy/aws/README.md) | The one-box AWS deployment behind the live URL |
 
 `test/no-pii-in-prompt.test.ts` is the localization rule as a test: a dirty fixture (PAN, name, VPA, `pay_…`) is projected and none of it survives.
