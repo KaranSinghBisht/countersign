@@ -47,6 +47,7 @@ The repo also ships fifteen written limitations, each with a named remedy — th
 
 ## Honest metrics (for any free-text space)
 
+- Measured on the public instance (2026-09-02): 6 decisions in the live log (4 ALLOW, 1 DENY, 1 ESCALATE) under 6 signed checkpoints; 4 Razorpay test-mode orders created, 1 paid and captured; 3 webhooks received — 1 applied, 1 `ping.test` ignored, 1 for a payment this instance never created, refused; 0 double charges; live export verified 30/30 offline; 1 lost Checkout callback (the stranded-authorization incident above).
 - 401 unit + 145 integration tests; the counts are pinned in CI (`scripts/check-counts.ts` fails `make check` if the copy drifts).
 - 30 offline verifier checks across seven groups.
 - 8 rehearsed failures, run live by `make demo`.

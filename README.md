@@ -23,6 +23,18 @@ Built for the [Razorpay AI Buildathon](https://razorpay.com/buildathon/), Track 
 - [`/architecture`](https://65-2-105-145.sslip.io/architecture) — the whole system on one screen.
 - [`/agents.md`](https://65-2-105-145.sslip.io/agents.md) — the contract a buyer agent reads; every error shape it can receive is listed.
 
+**Measured on the public instance** — read straight from its database on 2026-09-02; the six GETs above let you check the shape of each number yourself.
+
+| Measure | Value |
+|---|---|
+| Decisions in the live log, sealed under 6 signed checkpoints | 6 — 4 ALLOW · 1 DENY · 1 ESCALATE |
+| Razorpay test-mode orders the worker created | 4 |
+| Paid and captured | 1 (`pay_TWQyR93wt0Di5N`, netbanking, against `order_TWLltVAmqEBj13`) |
+| Webhooks received | 3 — one `payment.captured` applied (created → captured); one `ping.test` ignored as unhandled; one `payment.captured` for a payment this instance never created, refused rather than guessed at |
+| Two payments for one receipt (a double charge) | 0 |
+| The live export, verified offline | 30/30 |
+| Checkout callback lost, payment stranded `authorized` | 1 — the captured payment carries `signature_verified: false`; capture landed through the webhook after a manual API capture. That incident is why the worker now reconciles against Razorpay every ten minutes. |
+
 The demos out there prove an agent can spend money. This proves it should have been allowed to.
 
 ---
