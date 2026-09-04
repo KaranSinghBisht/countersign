@@ -23,7 +23,7 @@ https://github.com/KaranSinghBisht/countersign
 
 ## 5-min Pitch Video Link
 
-(unlisted is fine — paste after recording; the script is DEMO.md)
+https://youtu.be/v63l_8iU45I
 
 ## Build Challenges & Technical Obstacles (read first — the real resume)
 
